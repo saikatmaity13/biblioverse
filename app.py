@@ -156,7 +156,7 @@ def process_pdf(uploaded_file):
 # 📂 SIDEBAR
 # ==========================================
 with st.sidebar:
-    st.title("📚 Library Card")
+    st.title(" Library Card")
     st.divider()
     st.header("  Wishlist")
     
@@ -290,3 +290,4 @@ with tab4:
             ctx = "\n".join([d.page_content for d in docs])
 
             st.write(ask_ai(f"Context: {ctx}", q))
+
