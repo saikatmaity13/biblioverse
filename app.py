@@ -164,46 +164,32 @@ try:
 except: st.stop()
 
 def ask_ai_raw(sys_msg, user_msg):
-    # List of models to try (Backup system)
-    # 1. Phi-3.5 (Small, fast, reliable)
-    # 2. Zephyr (Good quality)
-    # 3. Mistral (High quality, but often busy)
-    models = [
-        "microsoft/Phi-3.5-mini-instruct",
-        "HuggingFaceH4/zephyr-7b-beta",
-        "mistralai/Mistral-7B-Instruct-v0.3"
-    ]
+    # We will try ONE specific reliable model and print the raw error if it fails.
+    # Model: Zephyr 7B (Very standard, usually reliable)
+    model_id = "HuggingFaceH4/zephyr-7b-beta"
+    api_url = f"https://api-inference.huggingface.co/models/{model_id}"
     
     headers = {"Authorization": f"Bearer {os.environ['HUGGINGFACEHUB_API_TOKEN']}"}
     
-    # Try each model until one works
-    for model in models:
-        api_url = f"https://router.huggingface.co/models/{model}"
+    payload = {
+        "inputs": f"<|system|>\n{sys_msg}</s>\n<|user|>\n{user_msg}</s>\n<|assistant|>",
+        "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False}
+    }
+
+    try:
+        response = requests.post(api_url, headers=headers, json=payload)
         
-        # Universal prompt format that works for most models
-        payload = {
-            "inputs": f"<|system|>\n{sys_msg}\n<|user|>\n{user_msg}\n<|assistant|>",
-            "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False}
-        }
-
-        try:
-            # print(f"Trying model: {model}...") # (Optional debug)
-            response = requests.post(api_url, headers=headers, json=payload)
-            
-            # If successful (200), return the answer immediately
-            if response.status_code == 200:
-                output = response.json()
-                if isinstance(output, list) and "generated_text" in output[0]:
-                    return output[0]["generated_text"]
-            
-            # If server is busy (503), try the next model
-            # If model not found (404), try the next model
-            continue 
-
-        except:
-            continue
-            
-    return "⚠️ All AI models are currently busy or down. Please try again in 1 minute."
+        # SUCCESS
+        if response.status_code == 200:
+            output = response.json()
+            if isinstance(output, list) and "generated_text" in output[0]:
+                return output[0]["generated_text"]
+                
+        # FAILURE - RETURN THE REAL REASON
+        return f"⚠️ ERROR {response.status_code}: {response.text}"
+        
+    except Exception as e:
+        return f"⚠️ SYSTEM ERROR: {str(e)}"
 
 def process_pdf(f):
     reader = pypdf.PdfReader(f)
@@ -338,6 +324,7 @@ if "username" not in st.session_state:
                     st.warning("Please enter username and password.")
 else:
     main_app()
+
 
 
 
