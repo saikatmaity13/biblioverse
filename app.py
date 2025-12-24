@@ -165,7 +165,7 @@ except: st.stop()
 
 def ask_ai_raw(sys_msg, user_msg):
     # 1. Use a reliable model (Mistral)
-    api_url = "https://router.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
+    api_url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
     
     headers = {"Authorization": f"Bearer {os.environ['HUGGINGFACEHUB_API_TOKEN']}"}
     
@@ -332,5 +332,6 @@ if "username" not in st.session_state:
                     st.warning("Please enter username and password.")
 else:
     main_app()
+
 
 
