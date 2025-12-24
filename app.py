@@ -164,19 +164,40 @@ try:
 except: st.stop()
 
 def ask_ai_raw(sys_msg, user_msg):
-    api_url = "https://router.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct"
+    # 1. Use a reliable model (Mistral)
+    api_url = "https://router.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
+    
     headers = {"Authorization": f"Bearer {os.environ['HUGGINGFACEHUB_API_TOKEN']}"}
+    
+    # 2. Use Standard Chat Format (Safest for Router API)
     payload = {
-        "inputs": f"<|im_start|>system\n{sys_msg}<|im_end|>\n<|im_start|>user\n{user_msg}<|im_end|>\n<|im_start|>assistant",
-        "parameters": {"max_new_tokens": 800, "temperature": 0.7, "return_full_text": False}
+        "inputs": f"[INST] {sys_msg}\n{user_msg} [/INST]",
+        "parameters": {"max_new_tokens": 500, "temperature": 0.7}
     }
+
     try:
         response = requests.post(api_url, headers=headers, json=payload)
+        
+        # 3. Handle "Model Loading" (503 Error)
+        if response.status_code == 503:
+            return "⏳ AI is waking up... Wait 30 seconds and try again."
+            
+        # 4. Handle other API errors
+        if response.status_code != 200:
+            return f"⚠️ Error {response.status_code}: {response.text}"
+            
         output = response.json()
+        
+        # 5. Extract text safely
         if isinstance(output, list) and "generated_text" in output[0]:
             return output[0]["generated_text"]
-        return "⚠️ AI thinking..."
-    except: return "⚠️ Connection Error."
+        elif isinstance(output, dict) and "error" in output:
+            return f"⚠️ API Error: {output['error']}"
+            
+        return f"⚠️ Unknown Response: {output}"
+        
+    except Exception as e:
+        return f"⚠️ System Error: {str(e)}"
 
 def process_pdf(f):
     reader = pypdf.PdfReader(f)
@@ -311,4 +332,5 @@ if "username" not in st.session_state:
                     st.warning("Please enter username and password.")
 else:
     main_app()
+
 
