@@ -192,9 +192,30 @@ def search_google_books(query):
     return {"found": False}
 
 def ask_ai(sys, msg):
+    api_url = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct"
+    headers = {"Authorization": f"Bearer {os.environ['HUGGINGFACEHUB_API_TOKEN']}"}
+    
+    payload = {
+        "inputs": f"<|im_start|>system\n{sys}<|im_end|>\n<|im_start|>user\n{msg}<|im_end|>\n<|im_start|>assistant",
+        "parameters": {"max_new_tokens": 800, "temperature": 0.7, "return_full_text": False}
+    }
+
     try:
-        return client.chat_completion([{"role": "system", "content": sys}, {"role": "user", "content": msg}], max_tokens=800).choices[0].message.content
-    except: return "AI Error"
+        response = requests.post(api_url, headers=headers, json=payload)
+        output = response.json()
+        
+        # Debugging: Print error if one comes back from the API
+        if "error" in output:
+            return f"⚠️ API Error: {output['error']}"
+            
+        # Extract text for Text Generation models
+        if isinstance(output, list) and "generated_text" in output[0]:
+            return output[0]["generated_text"]
+            
+        return "⚠️ Empty response from AI."
+        
+    except Exception as e:
+        return f"⚠️ Connection Error: {str(e)}"
 
 def process_chat(query):
     scout = search_google_books(query)
@@ -289,5 +310,6 @@ with tab4:
             ctx = "\n".join([d.page_content for d in docs])
 
             st.write(ask_ai(f"Context: {ctx}", q))
+
 
 
