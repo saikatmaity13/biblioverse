@@ -124,39 +124,46 @@ def get_user_stats(username: str) -> Dict:
 # ==========================================
 # 📚 BOOK SEARCH (AUTHENTICATED)
 # ==========================================
+# ==========================================
+# 📚 BOOK SEARCH (DEBUG MODE)
+# ==========================================
 def search_books(query: str, max_results: int = 5) -> List[Dict]:
     url = "https://www.googleapis.com/books/v1/volumes"
     
-    # --- THIS IS THE FIX FOR THE 403 ERROR ---
-    # We load the Key you just created from Secrets
+    # 1. Check if Key exists
     api_key = st.secrets.get("GOOGLE_BOOKS_KEY")
-    
+    if not api_key:
+        st.error("❌ Critical Error: 'GOOGLE_BOOKS_KEY' is missing from Secrets.")
+        return []
+        
+    # 2. Prepare Request
     params = {
         "q": query, 
         "maxResults": max_results, 
-        "langRestrict": "en"
+        "langRestrict": "en",
+        "key": api_key  # Must use the key!
     }
     
-    # If the key exists, add it to the request (The VIP Pass)
-    if api_key:
-        params["key"] = api_key
-    else:
-        st.warning("⚠️ GOOGLE_BOOKS_KEY not found in Secrets. Search might fail.")
-    
     try:
-        # Attempt 1: Strict Search
+        # 3. Make the call
         response = requests.get(url, params=params, timeout=10)
-        res = response.json()
+        data = response.json()
         
-        # Attempt 2: Fallback (Broad Search) if empty
-        if "items" not in res:
-            params.pop("langRestrict", None) # Remove language filter
-            response = requests.get(url, params=params, timeout=10)
-            res = response.json()
-        
+        # 4. TRAP THE ERROR (This is what we were missing)
+        if "error" in data:
+            err_msg = data["error"]["message"]
+            st.error(f"⚠️ Google API Error: {err_msg}")
+            # Common Fixes based on error
+            if "API key not valid" in err_msg:
+                st.info("💡 Fix: Check if you copied the key correctly. Did you miss a character?")
+            if "IP address" in err_msg:
+                st.info("💡 Fix: Go to Google Cloud Console > Credentials and set Application Restrictions to 'None'.")
+            return []
+            
+        # 5. Process Results
         books = []
-        if "items" in res:
-            for item in res["items"]:
+        if "items" in data:
+            for item in data["items"]:
                 info = item.get("volumeInfo", {})
                 books.append({
                     "title": info.get("title", "Unknown"),
@@ -171,12 +178,18 @@ def search_books(query: str, max_results: int = 5) -> List[Dict]:
                     "pages": info.get("pageCount", 0),
                     "categories": ", ".join(info.get("categories", ["General"]))
                 })
-        return books
+            return books
+        else:
+            # Fallback for empty results (Try without "English" filter)
+            if "langRestrict" in params:
+                params.pop("langRestrict")
+                return search_books(query, max_results) # Retry recursively once
+                
+        return []
         
     except Exception as e:
-        st.error(f"⚠️ Search Error: {str(e)}")
+        st.error(f"⚠️ System Error: {str(e)}")
         return []
-
 # ==========================================
 # 🤖 AI ASSISTANT
 # ==========================================
@@ -544,3 +557,4 @@ if "username" not in st.session_state:
                         st.error(msg)
 else:
     main_app()
+
