@@ -127,40 +127,35 @@ def get_user_stats(username: str) -> Dict:
 # ==========================================
 # 📚 BOOK SEARCH (DEBUG MODE)
 # ==========================================
+# ==========================================
+# 📚 BOOK SEARCH (FIXED: GEO-RESTRICTION)
+# ==========================================
 def search_books(query: str, max_results: int = 5) -> List[Dict]:
     url = "https://www.googleapis.com/books/v1/volumes"
     
-    # 1. Check if Key exists
     api_key = st.secrets.get("GOOGLE_BOOKS_KEY")
-    if not api_key:
-        st.error("❌ Critical Error: 'GOOGLE_BOOKS_KEY' is missing from Secrets.")
-        return []
-        
-    # 2. Prepare Request
+    
+    # FIX: We add 'country': 'IN' to tell Google we are in India.
+    # This fixes the "Cannot determine user location" error.
     params = {
         "q": query, 
         "maxResults": max_results, 
         "langRestrict": "en",
-        "key": api_key  # Must use the key!
+        "country": "IN" 
     }
     
+    if api_key:
+        params["key"] = api_key
+    
     try:
-        # 3. Make the call
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
         
-        # 4. TRAP THE ERROR (This is what we were missing)
+        # DEBUG: Print error if it still fails
         if "error" in data:
-            err_msg = data["error"]["message"]
-            st.error(f"⚠️ Google API Error: {err_msg}")
-            # Common Fixes based on error
-            if "API key not valid" in err_msg:
-                st.info("💡 Fix: Check if you copied the key correctly. Did you miss a character?")
-            if "IP address" in err_msg:
-                st.info("💡 Fix: Go to Google Cloud Console > Credentials and set Application Restrictions to 'None'.")
+            st.error(f"⚠️ Google Error: {data['error']['message']}")
             return []
             
-        # 5. Process Results
         books = []
         if "items" in data:
             for item in data["items"]:
@@ -178,14 +173,7 @@ def search_books(query: str, max_results: int = 5) -> List[Dict]:
                     "pages": info.get("pageCount", 0),
                     "categories": ", ".join(info.get("categories", ["General"]))
                 })
-            return books
-        else:
-            # Fallback for empty results (Try without "English" filter)
-            if "langRestrict" in params:
-                params.pop("langRestrict")
-                return search_books(query, max_results) # Retry recursively once
-                
-        return []
+        return books
         
     except Exception as e:
         st.error(f"⚠️ System Error: {str(e)}")
@@ -557,4 +545,5 @@ if "username" not in st.session_state:
                         st.error(msg)
 else:
     main_app()
+
 
