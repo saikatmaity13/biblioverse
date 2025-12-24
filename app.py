@@ -126,32 +126,52 @@ def get_user_stats(username: str) -> Dict:
 # ==========================================
 def search_books(query: str, max_results: int = 5) -> List[Dict]:
     url = "https://www.googleapis.com/books/v1/volumes"
-    params = {"q": query, "maxResults": max_results, "langRestrict": "en"}
     
-    try:
-        res = requests.get(url, params=params, timeout=5).json()
-        if "items" not in res:
-            res = requests.get(url, params={"q": query, "maxResults": max_results}, timeout=5).json()
+    # Try multiple search strategies
+    search_strategies = [
+        {"q": query, "maxResults": max_results},  # Broad search first
+        {"q": f'intitle:"{query}"', "maxResults": max_results},  # Title search
+        {"q": query, "maxResults": max_results, "langRestrict": "en"},  # English only
+        {"q": query.replace(" ", "+"), "maxResults": max_results}  # Plus signs
+    ]
+    
+    books = []
+    
+    for params in search_strategies:
+        try:
+            res = requests.get(url, params=params, timeout=10).json()
+            
+            if "items" in res and len(res["items"]) > 0:
+                for item in res["items"]:
+                    info = item.get("volumeInfo", {})
+                    
+                    # Skip items without basic info
+                    if not info.get("title"):
+                        continue
+                    
+                    books.append({
+                        "title": info.get("title", "Unknown"),
+                        "authors": ", ".join(info.get("authors", ["Unknown"])),
+                        "description": info.get("description", "No description available."),
+                        "image": info.get("imageLinks", {}).get("thumbnail", info.get("imageLinks", {}).get("smallThumbnail")),
+                        "rating": info.get("averageRating", 0),
+                        "rating_count": info.get("ratingsCount", 0),
+                        "link": info.get("previewLink") or info.get("infoLink") or "",
+                        "publisher": info.get("publisher", "Unknown"),
+                        "date": info.get("publishedDate", "Unknown"),
+                        "pages": info.get("pageCount", 0),
+                        "categories": ", ".join(info.get("categories", ["General"]))
+                    })
+                
+                # If we found books, return them
+                if books:
+                    return books[:max_results]
         
-        books = []
-        for item in res.get("items", []):
-            info = item.get("volumeInfo", {})
-            books.append({
-                "title": info.get("title", "Unknown"),
-                "authors": ", ".join(info.get("authors", ["Unknown"])),
-                "description": info.get("description", "No description"),
-                "image": info.get("imageLinks", {}).get("thumbnail"),
-                "rating": info.get("averageRating", 0),
-                "rating_count": info.get("ratingsCount", 0),
-                "link": info.get("previewLink", info.get("infoLink")),
-                "publisher": info.get("publisher", "Unknown"),
-                "date": info.get("publishedDate", "Unknown"),
-                "pages": info.get("pageCount", 0),
-                "categories": ", ".join(info.get("categories", ["General"]))
-            })
-        return books
-    except:
-        return []
+        except Exception as e:
+            print(f"Search attempt failed: {e}")
+            continue
+    
+    return books
 
 # ==========================================
 # 🤖 AI ASSISTANT
