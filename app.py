@@ -15,7 +15,7 @@ import requests
 import streamlit as st
 import pypdf
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials # <--- NEW MODERN LIBRARY
 from datetime import datetime
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -44,34 +44,55 @@ else:
     st.stop()
 
 # ==========================================
-# ☁️ GOOGLE SHEETS (DB CONNECTION)
+# ☁️ GOOGLE SHEETS (NEW MODERN CONNECTION)
 # ==========================================
 @st.cache_resource
 def get_client():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    if os.path.exists("secrets.json"):
-        creds = ServiceAccountCredentials.from_json_keyfile_name("secrets.json", scope)
-    elif "gcp_service_account" in st.secrets:
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
+    # Define the Scopes (Permissions)
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    
+    # 1. Try Loading from Streamlit Secrets (Cloud)
+    if "gcp_service_account" in st.secrets:
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=scopes
+        )
+    # 2. Try Loading from Local File (Local Testing)
+    elif os.path.exists("secrets.json"):
+        creds = Credentials.from_service_account_file("secrets.json", scopes=scopes)
     else:
         st.error("⚠️ Google Credentials missing!")
         st.stop()
+        
     return gspread.authorize(creds)
 
 def get_sheet(sheet_name):
     """Helper to get a specific tab."""
-    client = get_client()
-    return client.open("BookBot_Data").worksheet(sheet_name)
+    try:
+        client = get_client()
+        # Open by Name
+        return client.open("BookBot_Data").worksheet(sheet_name)
+    except Exception as e:
+        # If "Users" tab is missing, we catch it here
+        if "WorksheetNotFound" in str(type(e)):
+            st.error(f"⚠️ Critical Error: The tab '{sheet_name}' was not found in your Google Sheet.")
+            st.info("Please create a new tab named exactly 'Users' in your sheet.")
+            st.stop()
+        elif "SpreadsheetNotFound" in str(type(e)):
+            st.error("⚠️ Critical Error: The Google Sheet 'BookBot_Data' was not found.")
+            st.info(f"Make sure you shared the sheet with this email: {st.secrets['gcp_service_account']['client_email']}")
+            st.stop()
+        raise e
 
 # ==========================================
 # 🔐 AUTHENTICATION SYSTEM
 # ==========================================
 def login_user(username, password):
     """
-    Returns:
-    - "success": Login OK
-    - "wrong_pass": Password incorrect
-    - "register": User new, registered
+    Returns: "success", "wrong_pass", "register", "error"
     """
     try:
         users_sheet = get_sheet("Users")
@@ -98,9 +119,8 @@ def login_user(username, password):
 # ==========================================
 def get_my_books(username):
     try:
-        sheet = get_sheet("Sheet1") # Default tab
+        sheet = get_sheet("Sheet1") # Default tab for books
         data = sheet.get_all_values()
-        # [Username, Book, Date]
         return [row[1] for row in data if len(row) > 1 and row[0] == username]
     except: return []
 
