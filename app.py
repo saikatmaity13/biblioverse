@@ -27,7 +27,7 @@ from typing import Dict, List, Optional, Tuple
 # ==========================================
 # 🔧 CONFIG & SECURITY
 # ==========================================
-st.set_page_config(page_title="BookBot Pro", page_icon="📚", layout="wide")
+st.set_page_config(page_title="Biblioverse",  layout="wide")
 
 st.markdown("""
 <style>
@@ -468,5 +468,6 @@ if "username" not in st.session_state:
                     else: st.error(msg)
 else:
     main_app()
+
 
 
