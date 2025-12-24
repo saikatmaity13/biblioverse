@@ -164,32 +164,39 @@ try:
 except: st.stop()
 
 def ask_ai_raw(sys_msg, user_msg):
-    # We will try ONE specific reliable model and print the raw error if it fails.
-    # Model: Zephyr 7B (Very standard, usually reliable)
-    model_id = "HuggingFaceH4/zephyr-7b-beta"
-    api_url = f"https://api-inference.huggingface.co/models/{model_id}"
+    # 1. Use the NEW Router URL (Fixes Error 410)
+    # 2. Use Microsoft Phi-3.5 (Fixes "Busy" errors because it is small and fast)
+    api_url = "https://router.huggingface.co/models/microsoft/Phi-3.5-mini-instruct"
     
     headers = {"Authorization": f"Bearer {os.environ['HUGGINGFACEHUB_API_TOKEN']}"}
     
+    # 3. Use a Generic Prompt Format suitable for Phi
     payload = {
-        "inputs": f"<|system|>\n{sys_msg}</s>\n<|user|>\n{user_msg}</s>\n<|assistant|>",
+        "inputs": f"<|system|>\n{sys_msg}<|end|>\n<|user|>\n{user_msg}<|end|>\n<|assistant|>",
         "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False}
     }
 
     try:
         response = requests.post(api_url, headers=headers, json=payload)
         
-        # SUCCESS
-        if response.status_code == 200:
-            output = response.json()
-            if isinstance(output, list) and "generated_text" in output[0]:
-                return output[0]["generated_text"]
-                
-        # FAILURE - RETURN THE REAL REASON
-        return f"⚠️ ERROR {response.status_code}: {response.text}"
+        # 4. Handle "Model Sleeping" (Error 503)
+        if response.status_code == 503:
+            return "⏳ AI is waking up... Please wait 30 seconds and try again."
+        
+        # 5. Handle any other error (Print it clearly)
+        if response.status_code != 200:
+            return f"⚠️ API Error {response.status_code}: {response.text}"
+            
+        output = response.json()
+        
+        # 6. Success!
+        if isinstance(output, list) and "generated_text" in output[0]:
+            return output[0]["generated_text"]
+            
+        return "⚠️ Empty response from AI."
         
     except Exception as e:
-        return f"⚠️ SYSTEM ERROR: {str(e)}"
+        return f"⚠️ System Error: {str(e)}"
 
 def process_pdf(f):
     reader = pypdf.PdfReader(f)
@@ -324,6 +331,7 @@ if "username" not in st.session_state:
                     st.warning("Please enter username and password.")
 else:
     main_app()
+
 
 
 
