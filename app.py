@@ -122,31 +122,36 @@ def get_user_stats(username: str) -> Dict:
         return {"wishlist": 0, "reviews": 0}
 
 # ==========================================
-# 📚 BOOK SEARCH
-# ==========================================
-# ==========================================
-# 📚 BOOK SEARCH (DEBUG VERSION)
+# 📚 BOOK SEARCH (AUTHENTICATED)
 # ==========================================
 def search_books(query: str, max_results: int = 5) -> List[Dict]:
     url = "https://www.googleapis.com/books/v1/volumes"
     
-    # 1. Try Strict Search (English)
-    params = {"q": query, "maxResults": max_results, "langRestrict": "en"}
+    # --- THIS IS THE FIX FOR THE 403 ERROR ---
+    # We load the Key you just created from Secrets
+    api_key = st.secrets.get("GOOGLE_BOOKS_KEY")
+    
+    params = {
+        "q": query, 
+        "maxResults": max_results, 
+        "langRestrict": "en"
+    }
+    
+    # If the key exists, add it to the request (The VIP Pass)
+    if api_key:
+        params["key"] = api_key
+    else:
+        st.warning("⚠️ GOOGLE_BOOKS_KEY not found in Secrets. Search might fail.")
     
     try:
+        # Attempt 1: Strict Search
         response = requests.get(url, params=params, timeout=10)
-        
-        # DEBUG: Check if Google blocked us
-        if response.status_code != 200:
-            st.error(f"⚠️ Google API Error: {response.status_code}")
-            st.write(response.text) # Show the real error message
-            return []
-            
         res = response.json()
         
-        # 2. Fallback: Broad Search (If Strict failed)
+        # Attempt 2: Fallback (Broad Search) if empty
         if "items" not in res:
-            response = requests.get(url, params={"q": query, "maxResults": max_results}, timeout=10)
+            params.pop("langRestrict", None) # Remove language filter
+            response = requests.get(url, params=params, timeout=10)
             res = response.json()
         
         books = []
@@ -169,7 +174,7 @@ def search_books(query: str, max_results: int = 5) -> List[Dict]:
         return books
         
     except Exception as e:
-        st.error(f"⚠️ Connection Error: {str(e)}") # This will print the REAL error
+        st.error(f"⚠️ Search Error: {str(e)}")
         return []
 
 # ==========================================
@@ -443,30 +448,7 @@ def main_app():
                     st.divider()
             else:
                 st.error(f"❌ No books found for '{query}'")
-                st.info("💡 **Possible issues:**\n- Google Books API might be blocked\n- Check your internet connection\n- Try a different search term")
-                
-                # Manual test
-                with st.expander("🔧 Test API Connection"):
-                    if st.button("Test Connection"):
-                        test_url = "https://www.googleapis.com/books/v1/volumes?q=harry+potter&maxResults=1"
-                        try:
-                            test_response = requests.get(test_url, timeout=10)
-                            st.write(f"**Status Code:** {test_response.status_code}")
-                            
-                            if test_response.status_code == 200:
-                                test_data = test_response.json()
-                                if "items" in test_data:
-                                    st.success("✅ API is working! Try a different book title.")
-                                    st.json(test_data["items"][0]["volumeInfo"])
-                                else:
-                                    st.warning("API responded but no items found")
-                                    st.json(test_data)
-                            else:
-                                st.error(f"API returned error code: {test_response.status_code}")
-                                st.text(test_response.text)
-                        except Exception as e:
-                            st.error(f"❌ Connection Error: {str(e)}")
-                            st.info("The Google Books API might be blocked by your network/firewall.")
+                st.info("Check your spelling or try a more general term.")
     
     # TAB 2: RECOMMENDATIONS
     with tab2:
@@ -562,4 +544,3 @@ if "username" not in st.session_state:
                         st.error(msg)
 else:
     main_app()
-
