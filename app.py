@@ -261,8 +261,7 @@ with tab1:
                                 st.success("Saved to Cloud!")
                                 st.rerun()
 
-            st.session_state.messages.append({"role": "assistant", "content": ans, "image": scout["image"]})
-
+            st.session_state.messages.append({"role": "assistant", "content": ans, "image": scout.get("image")})
 with tab2:
     t = st.text_area("I like...")
     if st.button("Get Recs"): st.markdown(get_recs(t))
@@ -290,4 +289,5 @@ with tab4:
             ctx = "\n".join([d.page_content for d in docs])
 
             st.write(ask_ai(f"Context: {ctx}", q))
+
 
