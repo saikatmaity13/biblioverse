@@ -60,7 +60,7 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 # ==========================================
-# ☁️ DATABASE MANAGER (AUTO-FIXING)
+# ☁️ DATABASE MANAGER
 # ==========================================
 @st.cache_resource
 def get_sheets_client():
@@ -75,23 +75,17 @@ def get_sheets_client():
     return gspread.authorize(creds)
 
 def get_sheet(name: str):
-    """
-    Tries to open a sheet. If missing, CREATES it with correct headers.
-    This fixes the 'Wishlist not working' error.
-    """
     client = get_sheets_client()
     try:
         return client.open("BookBot_Data").worksheet(name)
     except:
-        # Auto-create missing tab
         sh = client.open("BookBot_Data")
         ws = sh.add_worksheet(title=name, rows="1000", cols="5")
         
-        # Define headers for each type
         headers = {
             "Reviews": ["Book Title", "Username", "Rating", "Comment", "Date"],
             "Users": ["Username", "Password", "JoinDate"],
-            "Wishlist": ["Username", "Book Title", "Date Added"]  # <--- NEW DEDICATED TAB
+            "Wishlist": ["Username", "Book Title", "Date Added"] 
         }
         
         if name in headers:
@@ -119,7 +113,7 @@ def login_user(username: str, password: str) -> Tuple[str, str]:
 
 def get_user_stats(username: str) -> Dict:
     try:
-        wishlist_data = get_sheet("Wishlist").get_all_values() # Changed to 'Wishlist'
+        wishlist_data = get_sheet("Wishlist").get_all_values()
         review_data = get_sheet("Reviews").get_all_values()
         
         w_count = len([r for r in wishlist_data if len(r) > 1 and r[0] == username])
@@ -136,7 +130,7 @@ def search_books(query: str) -> List[Dict]:
     url = "https://www.googleapis.com/books/v1/volumes"
     api_key = st.secrets.get("GOOGLE_BOOKS_KEY")
     
-    # Force 1 Result + India
+    # 1 Result Only + India Fix
     params = {"q": query, "maxResults": 1, "langRestrict": "en", "country": "IN"}
     if api_key: params["key"] = api_key
     
@@ -215,20 +209,22 @@ def process_pdf(file) -> Optional[Chroma]:
     except: return None
 
 # ==========================================
-# 📖 WISHLIST (FIXED)
+# 📖 WISHLIST (CALLBACK METHOD)
 # ==========================================
 def get_wishlist(username: str) -> List[Dict]:
     try:
-        # Uses dedicated 'Wishlist' tab now
         data = get_sheet("Wishlist").get_all_values()[1:]
         return [{"title": r[1], "date": r[2] if len(r) > 2 else "Unknown"} 
                 for r in data if len(r) > 1 and r[0] == username]
     except Exception as e:
-        print(f"Wishlist Error: {e}")
+        print(f"Wishlist Fetch Error: {e}")
         return []
 
-def add_to_wishlist(username: str, title: str):
-    """Adds book and forces a rerun to update UI"""
+def add_to_wishlist_callback(username: str, title: str):
+    """
+    CALLBACK FUNCTION: Runs BEFORE the app refreshes.
+    This guarantees the data is sent to Google Sheets.
+    """
     try:
         sheet = get_sheet("Wishlist")
         existing = sheet.get_all_values()
@@ -236,26 +232,27 @@ def add_to_wishlist(username: str, title: str):
         # Check duplicates
         for row in existing:
             if len(row) > 1 and row[0] == username and row[1] == title:
-                st.toast("⚠️ Already in wishlist!", icon="ℹ️")
+                st.toast(f"⚠️ '{title}' is already in your wishlist!", icon="ℹ️")
                 return
 
         # Add new
         sheet.append_row([username, title, datetime.now().strftime("%Y-%m-%d")])
-        st.toast("✅ Added to Wishlist!", icon="🎉")
+        st.toast(f"✅ Added '{title}' to Wishlist!", icon="🎉")
         
     except Exception as e:
-        st.error(f"Save failed: {str(e)}")
+        st.error(f"❌ Save Failed: {str(e)}")
 
-def remove_from_wishlist(username: str, title: str) -> bool:
+def remove_from_wishlist_callback(username: str, title: str):
     try:
         sheet = get_sheet("Wishlist")
         data = sheet.get_all_values()
         for i, row in enumerate(data):
             if len(row) > 1 and row[0] == username and row[1] == title:
                 sheet.delete_rows(i + 1)
-                return True
-        return False
-    except: return False
+                st.toast(f"🗑️ Removed '{title}'", icon="✅")
+                return
+    except Exception as e:
+        st.error(f"❌ Remove Failed: {str(e)}")
 
 # ==========================================
 # ⭐ REVIEWS
@@ -300,11 +297,14 @@ def render_book_card(book: Dict, username: str):
         
         col_a, col_b, col_c = st.columns(3)
         
-        # 1. Wishlist Button
+        # 1. Wishlist Button (Using on_click Callback)
         with col_a:
-            if st.button("❤️ Wishlist", key=f"w_{book['title']}_{datetime.now().microsecond}"):
-                add_to_wishlist(username, book['title'])
-                # Trick: We don't need explicit rerun here because button click triggers script rerun automatically
+            st.button(
+                "❤️ Wishlist", 
+                key=f"w_{book['title']}_{datetime.now().microsecond}",
+                on_click=add_to_wishlist_callback,  # <--- THIS IS THE FIX
+                args=(username, book['title'])      # Passes data securely
+            )
         
         # 2. Preview Link
         with col_b:
@@ -392,7 +392,7 @@ def main_app():
             with st.spinner("Thinking..."):
                 st.markdown(st.session_state.ai.recommend_books(prefs))
 
-    # TAB 3: LIBRARY (Full Wishlist Management)
+    # TAB 3: LIBRARY
     with tab3:
         st.header(f"📖 {username}'s Library")
         wishlist = get_wishlist(username)
@@ -401,11 +401,9 @@ def main_app():
             df.index = range(1, len(df) + 1)
             st.dataframe(df, use_container_width=True)
             
+            # Using Callback for Remove as well
             to_remove = st.selectbox("Select to remove:", [w['title'] for w in wishlist])
-            if st.button("Remove Book", use_container_width=True):
-                if remove_from_wishlist(username, to_remove):
-                    st.success(f"✅ Removed '{to_remove}'")
-                    st.rerun()
+            st.button("Remove Book", on_click=remove_from_wishlist_callback, args=(username, to_remove))
         else:
             st.info("📚 Your library is empty!")
 
