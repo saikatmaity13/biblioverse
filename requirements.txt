@@ -9,3 +9,5 @@ langchain-huggingface
 langchain-text-splitters
 huggingface-hub
 chromadb
+sentence-transformers
+pysqlite3-binary
