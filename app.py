@@ -33,6 +33,7 @@ st.markdown("""
 <style>
     .stButton>button {border-radius: 5px; font-weight: 600;}
     div[data-testid="stExpander"] {border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);}
+    .review-text {font-family: 'Georgia', serif; font-size: 1.1rem; line-height: 1.6;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -78,7 +79,6 @@ def get_sheet(name: str):
     try:
         return client.open("BookBot_Data").worksheet(name)
     except:
-        # Auto-create missing tab
         sh = client.open("BookBot_Data")
         ws = sh.add_worksheet(title=name, rows="1000", cols="5")
         
@@ -165,7 +165,7 @@ def search_books(query: str) -> List[Dict]:
         return []
 
 # ==========================================
-# 🤖 AI ASSISTANT (UPGRADED)
+# 🤖 AI ASSISTANT (ELITE CRITIC MODE)
 # ==========================================
 class AIHelper:
     def __init__(self):
@@ -173,15 +173,22 @@ class AIHelper:
         self.model = "HuggingFaceH4/zephyr-7b-beta"
     
     def summarize_book(self, book: Dict) -> str:
-        # --- NEW PROFESSIONAL PROMPT ---
-        system_msg = "You are an elite literary critic. Your analysis is deep, structured, and insightful."
+        # --- THE PROFESSIONAL PROMPT ---
+        system_msg = (
+            "You are a Senior Literary Critic for 'The New York Times Book Review'. "
+            "Your writing is sophisticated, analytical, and elegant. "
+            "Avoid generic phrases. Focus on style, themes, and narrative impact."
+        )
         user_msg = (
-            f"Write a comprehensive, high-quality review of '{book['title']}' by {book['authors']}.\n"
-            f"Use this description as context, but use your own knowledge if possible: {book['description'][:800]}\n\n"
-            "Format the output strictly as follows:\n"
-            "**🧐 In-Depth Analysis**\n[Write 2 detailed paragraphs about the premise and narrative arc]\n\n"
-            "**🗝️ Key Themes & Insights**\n[Provide 3-4 bullet points of the deeper meaning]\n\n"
-            "**⚖️ Critical Verdict**\n[A final professional assessment of who should read this book]"
+            f"Write a professional critique of '{book['title']}' by {book['authors']}.\n"
+            f"Context: {book['description'][:800]}\n\n"
+            "Structure your response exactly like this:\n\n"
+            "### 🖋️ Literary Analysis\n"
+            "[Write a sophisticated paragraph analyzing the plot's premise and the author's writing style. Discuss the narrative voice.]\n\n"
+            "### 🗝️ Core Themes\n"
+            "[Analyze 2-3 major themes (e.g., morality, identity, power) explored in the text. Be specific.]\n\n"
+            "### ⚖️ The Verdict\n"
+            "[A final, authoritative sentence on why this book matters and who it is for.]"
         )
         
         try:
@@ -191,8 +198,8 @@ class AIHelper:
                     {"role": "user", "content": user_msg}
                 ],
                 model=self.model,
-                max_tokens=600,  # Increased length for detail
-                temperature=0.7
+                max_tokens=750,  # Maximize length for depth
+                temperature=0.75 # Slightly higher creativity
             )
             return res.choices[0].message.content
         except: return "Summary unavailable."
@@ -331,12 +338,10 @@ def render_book_card(book: Dict, username: str):
                       on_click=set_active_review_book, args=(book['title'],))
 
 def render_review_form(title: str, username: str):
-    # Only render form if this book is active
     if st.session_state.get("active_review_book") == title:
         st.divider()
         with st.container(border=True):
             st.subheader(f"📝 Review: {title}")
-            
             st.slider("Rating (1-5)", 1, 5, 5, key=f"rating_val_{title}")
             st.text_area("Your thoughts...", height=100, key=f"comment_val_{title}")
             
@@ -349,7 +354,6 @@ def render_review_form(title: str, username: str):
                     st.session_state["active_review_book"] = None
                     st.rerun()
 
-    # Always show existing reviews
     reviews = get_reviews(title)
     if reviews:
         with st.expander(f"📖 Read {len(reviews)} User Reviews", expanded=False):
@@ -389,7 +393,6 @@ def main_app():
     
     with tab1:
         if "search_query" not in st.session_state: st.session_state.search_query = ""
-        
         c_search, c_btn = st.columns([4, 1])
         with c_search:
             query = st.text_input("Search for books...", value=st.session_state.search_query, placeholder="Enter title or author")
@@ -405,8 +408,8 @@ def main_app():
                 if results:
                     for book in results:
                         render_book_card(book, username)
-                        with st.expander("🧐 Professional AI Analysis", expanded=True):
-                            st.markdown(st.session_state.ai.summarize_book(book))
+                        with st.expander("🧐 Professional Critic's Analysis", expanded=True):
+                            st.markdown(f"<div class='review-text'>{st.session_state.ai.summarize_book(book)}</div>", unsafe_allow_html=True)
                         render_review_form(book['title'], username)
                 else: st.error(f"❌ No books found for '{query}'")
 
