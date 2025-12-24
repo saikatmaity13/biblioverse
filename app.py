@@ -126,7 +126,7 @@ def get_user_stats(username: str) -> Dict:
         return {"wishlist": 0, "reviews": 0}
 
 # ==========================================
-# 📚 BOOK SEARCH
+#  BOOK SEARCH
 # ==========================================
 def search_books(query: str) -> List[Dict]:
     url = "https://www.googleapis.com/books/v1/volumes"
@@ -217,7 +217,7 @@ class AIHelper:
         except: return "Error processing question"
 
 # ==========================================
-# 📄 PDF PROCESSOR
+#  PDF PROCESSOR
 # ==========================================
 @st.cache_resource
 def get_embeddings():
@@ -234,7 +234,7 @@ def process_pdf(file) -> Optional[Chroma]:
     except: return None
 
 # ==========================================
-# 📖 WISHLIST (CALLBACK)
+#  WISHLIST (CALLBACK)
 # ==========================================
 def get_wishlist(username: str) -> List[Dict]:
     try:
@@ -468,6 +468,7 @@ if "username" not in st.session_state:
                     else: st.error(msg)
 else:
     main_app()
+
 
 
 
