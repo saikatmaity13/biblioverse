@@ -19,6 +19,7 @@ from google.oauth2.service_account import Credentials # <--- NEW MODERN LIBRARY
 from datetime import datetime
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
+from huggingface_hub import InferenceClient
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
@@ -164,39 +165,49 @@ try:
 except: st.stop()
 
 def ask_ai_raw(sys_msg, user_msg):
-    # 1. Use the NEW Router URL (Fixes Error 410)
-    # 2. Use Microsoft Phi-3.5 (Fixes "Busy" errors because it is small and fast)
-    api_url = "https://router.huggingface.co/models/microsoft/Phi-3.5-mini-instruct"
+    """
+    Uses the official Hugging Face Client to connect to the best available free model.
+    """
+    token = os.environ['HUGGINGFACEHUB_API_TOKEN']
     
-    headers = {"Authorization": f"Bearer {os.environ['HUGGINGFACEHUB_API_TOKEN']}"}
+    # We use Zephyr because it is the most reliable UNGATED free model.
+    # (Mistral and Gemma often require you to accept terms on the website, causing errors)
+    repo_id = "HuggingFaceH4/zephyr-7b-beta"
     
-    # 3. Use a Generic Prompt Format suitable for Phi
-    payload = {
-        "inputs": f"<|system|>\n{sys_msg}<|end|>\n<|user|>\n{user_msg}<|end|>\n<|assistant|>",
-        "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False}
-    }
+    client = InferenceClient(token=token)
+    
+    # Create the prompt in the format Zephyr expects
+    messages = [
+        {"role": "system", "content": sys_msg},
+        {"role": "user", "content": user_msg}
+    ]
 
     try:
-        response = requests.post(api_url, headers=headers, json=payload)
+        # The client automatically handles the new 'router' URLs for you
+        response = client.chat_completion(
+            messages=messages,
+            model=repo_id, 
+            max_tokens=500,
+            temperature=0.7
+        )
         
-        # 4. Handle "Model Sleeping" (Error 503)
-        if response.status_code == 503:
-            return "⏳ AI is waking up... Please wait 30 seconds and try again."
-        
-        # 5. Handle any other error (Print it clearly)
-        if response.status_code != 200:
-            return f"⚠️ API Error {response.status_code}: {response.text}"
-            
-        output = response.json()
-        
-        # 6. Success!
-        if isinstance(output, list) and "generated_text" in output[0]:
-            return output[0]["generated_text"]
-            
-        return "⚠️ Empty response from AI."
-        
+        # Return the clean text
+        return response.choices[0].message.content
+
     except Exception as e:
-        return f"⚠️ System Error: {str(e)}"
+        error_msg = str(e)
+        
+        # specific help for common errors
+        if "401" in error_msg:
+            return "⚠️ Auth Error: Your Hugging Face Token is invalid. Please generate a new one."
+        if "429" in error_msg:
+            return "⏳ Busy: You reached the hourly limit. Please wait a few minutes."
+        if "503" in error_msg:
+            return "⏳ The Model is loading. Please wait 30 seconds and try again."
+            
+        return f"⚠️ Error: {error_msg}"
+        
+    
 
 def process_pdf(f):
     reader = pypdf.PdfReader(f)
@@ -331,6 +342,7 @@ if "username" not in st.session_state:
                     st.warning("Please enter username and password.")
 else:
     main_app()
+
 
 
 
