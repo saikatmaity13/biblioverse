@@ -124,114 +124,53 @@ def get_user_stats(username: str) -> Dict:
 # ==========================================
 # 📚 BOOK SEARCH
 # ==========================================
+# ==========================================
+# 📚 BOOK SEARCH (DEBUG VERSION)
+# ==========================================
 def search_books(query: str, max_results: int = 5) -> List[Dict]:
-    """Search Google Books API with multiple fallback strategies"""
+    url = "https://www.googleapis.com/books/v1/volumes"
     
-    if not query or len(query.strip()) == 0:
-        return []
+    # 1. Try Strict Search (English)
+    params = {"q": query, "maxResults": max_results, "langRestrict": "en"}
     
-    base_url = "https://www.googleapis.com/books/v1/volumes"
-    
-    # Clean query
-    clean_query = query.strip()
-    
-    # Multiple search attempts
-    search_params_list = [
-        {"q": clean_query, "maxResults": max_results},
-        {"q": clean_query, "maxResults": max_results, "printType": "books"},
-        {"q": f"inauthor:{clean_query}", "maxResults": max_results},
-        {"q": f"intitle:{clean_query}", "maxResults": max_results},
-    ]
-    
-    all_books = []
-    
-    for params in search_params_list:
-        try:
-            # Make request with longer timeout
-            response = requests.get(
-                base_url, 
-                params=params, 
-                timeout=15,
-                headers={'User-Agent': 'Mozilla/5.0'}
-            )
-            
-            # Check if request was successful
-            if response.status_code != 200:
-                print(f"API returned status {response.status_code}")
-                continue
-            
-            data = response.json()
-            
-            # Check for errors in response
-            if "error" in data:
-                print(f"API error: {data['error']}")
-                continue
-            
-            # Check if we have items
-            if "items" not in data or len(data["items"]) == 0:
-                continue
-            
-            # Parse books
-            for item in data["items"]:
-                try:
-                    info = item.get("volumeInfo", {})
-                    
-                    if not info.get("title"):
-                        continue
-                    
-                    # Get image links
-                    img_links = info.get("imageLinks", {})
-                    image_url = (
-                        img_links.get("thumbnail") or 
-                        img_links.get("smallThumbnail") or 
-                        img_links.get("small") or
-                        None
-                    )
-                    
-                    # Build book object
-                    book = {
-                        "title": info.get("title", "Unknown Title"),
-                        "authors": ", ".join(info.get("authors", ["Unknown Author"])),
-                        "description": info.get("description", "No description available."),
-                        "image": image_url,
-                        "rating": float(info.get("averageRating", 0)),
-                        "rating_count": int(info.get("ratingsCount", 0)),
-                        "link": info.get("previewLink") or info.get("infoLink") or "#",
-                        "publisher": info.get("publisher", "Unknown"),
-                        "date": info.get("publishedDate", "Unknown"),
-                        "pages": int(info.get("pageCount", 0)),
-                        "categories": ", ".join(info.get("categories", ["Uncategorized"]))
-                    }
-                    
-                    # Avoid duplicates
-                    if not any(b["title"] == book["title"] for b in all_books):
-                        all_books.append(book)
-                    
-                    if len(all_books) >= max_results:
-                        return all_books[:max_results]
-                
-                except Exception as e:
-                    print(f"Error parsing book: {e}")
-                    continue
-            
-            # If we found books in this attempt, return them
-            if all_books:
-                return all_books[:max_results]
+    try:
+        response = requests.get(url, params=params, timeout=10)
         
-        except requests.exceptions.Timeout:
-            print(f"Request timeout for params: {params}")
-            continue
-        except requests.exceptions.ConnectionError:
-            print("Connection error - check internet")
-            continue
-        except requests.exceptions.RequestException as e:
-            print(f"Request error: {e}")
-            continue
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            continue
-    
-    return all_books
+        # DEBUG: Check if Google blocked us
+        if response.status_code != 200:
+            st.error(f"⚠️ Google API Error: {response.status_code}")
+            st.write(response.text) # Show the real error message
+            return []
+            
+        res = response.json()
+        
+        # 2. Fallback: Broad Search (If Strict failed)
+        if "items" not in res:
+            response = requests.get(url, params={"q": query, "maxResults": max_results}, timeout=10)
+            res = response.json()
+        
+        books = []
+        if "items" in res:
+            for item in res["items"]:
+                info = item.get("volumeInfo", {})
+                books.append({
+                    "title": info.get("title", "Unknown"),
+                    "authors": ", ".join(info.get("authors", ["Unknown"])),
+                    "description": info.get("description", "No description"),
+                    "image": info.get("imageLinks", {}).get("thumbnail"),
+                    "rating": info.get("averageRating", 0),
+                    "rating_count": info.get("ratingsCount", 0),
+                    "link": info.get("previewLink", info.get("infoLink")),
+                    "publisher": info.get("publisher", "Unknown"),
+                    "date": info.get("publishedDate", "Unknown"),
+                    "pages": info.get("pageCount", 0),
+                    "categories": ", ".join(info.get("categories", ["General"]))
+                })
+        return books
+        
+    except Exception as e:
+        st.error(f"⚠️ Connection Error: {str(e)}") # This will print the REAL error
+        return []
 
 # ==========================================
 # 🤖 AI ASSISTANT
@@ -623,3 +562,4 @@ if "username" not in st.session_state:
                         st.error(msg)
 else:
     main_app()
+
