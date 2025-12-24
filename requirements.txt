@@ -1,0 +1,11 @@
+streamlit
+pandas
+requests
+pypdf
+gspread
+oauth2client
+langchain-chroma
+langchain-huggingface
+langchain-text-splitters
+huggingface-hub
+chromadb
