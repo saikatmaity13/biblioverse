@@ -7,7 +7,7 @@ google-auth
 langchain-chroma
 langchain-huggingface
 langchain-text-splitters
-huggingface-hub
 chromadb
 sentence-transformers
 pysqlite3-binary
+huggingface-hub>=0.25.0
