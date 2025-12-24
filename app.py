@@ -192,7 +192,8 @@ def search_google_books(query):
     return {"found": False}
 
 def ask_ai(sys, msg):
-    api_url = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct"
+    # NEW URL: Uses "router" instead of "api-inference"
+    api_url = "https://router.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct"
     headers = {"Authorization": f"Bearer {os.environ['HUGGINGFACEHUB_API_TOKEN']}"}
     
     payload = {
@@ -204,11 +205,9 @@ def ask_ai(sys, msg):
         response = requests.post(api_url, headers=headers, json=payload)
         output = response.json()
         
-        # Debugging: Print error if one comes back from the API
         if "error" in output:
             return f"⚠️ API Error: {output['error']}"
             
-        # Extract text for Text Generation models
         if isinstance(output, list) and "generated_text" in output[0]:
             return output[0]["generated_text"]
             
@@ -310,6 +309,7 @@ with tab4:
             ctx = "\n".join([d.page_content for d in docs])
 
             st.write(ask_ai(f"Context: {ctx}", q))
+
 
 
 
