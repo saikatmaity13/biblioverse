@@ -25,7 +25,7 @@ from langchain_core.documents import Document
 # ==========================================
 # 🔧 CONFIG
 # ==========================================
-st.set_page_config(page_title="BookBot Pro", page_icon="📚", layout="wide")
+st.set_page_config(page_title="Biblioverse",  layout="wide")
 
 # Fix SSL
 os.environ['HF_HUB_DISABLE_SSL_VERIFY'] = '1'
@@ -311,3 +311,4 @@ if "username" not in st.session_state:
                     st.warning("Please enter username and password.")
 else:
     main_app()
+
