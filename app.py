@@ -32,6 +32,7 @@ st.set_page_config(page_title="BookBot Pro", page_icon="📚", layout="wide")
 st.markdown("""
 <style>
     .stButton>button {border-radius: 5px; font-weight: 600;}
+    div[data-testid="stExpander"] {border: 1px solid #e0e0e0; border-radius: 8px;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -77,7 +78,6 @@ def get_sheet(name: str):
     try:
         return client.open("BookBot_Data").worksheet(name)
     except:
-        # Auto-create missing tab
         sh = client.open("BookBot_Data")
         ws = sh.add_worksheet(title=name, rows="1000", cols="5")
         
@@ -107,7 +107,6 @@ def login_user(username: str, password: str) -> Tuple[str, str]:
             if i == 0: continue
             if len(row) >= 2 and row[0].strip().lower() == clean_user:
                 stored = row[1].strip()
-                # Hybrid Login (Supports Old & New Passwords)
                 if stored == hashed_pass or stored == clean_pass:
                     return "success", "Login successful!"
                 return "wrong_pass", "Incorrect password"
@@ -165,7 +164,7 @@ def search_books(query: str) -> List[Dict]:
         return []
 
 # ==========================================
-# 🤖 AI ASSISTANT
+# 🤖 AI ASSISTANT (PROFESSIONAL MODE)
 # ==========================================
 class AIHelper:
     def __init__(self):
@@ -173,11 +172,24 @@ class AIHelper:
         self.model = "HuggingFaceH4/zephyr-7b-beta"
     
     def summarize_book(self, book: Dict) -> str:
-        prompt = f"Title: {book['title']}\nAuthor: {book['authors']}\nDesc: {book['description'][:400]}\n\nBrief 3-sentence summary (no spoilers):"
+        # UPDATED PROMPT: Ask for detail and professionalism
+        prompt = (
+            f"Act as a professional literary critic. Provide a detailed summary of the book '{book['title']}' by {book['authors']}.\n"
+            f"Include:\n1. A comprehensive plot overview (no major spoilers).\n"
+            f"2. Key themes and messages.\n"
+            f"3. The writing style and target audience.\n"
+            f"Context: {book['description'][:600]}\n"
+            "Keep the tone engaging but professional."
+        )
         try:
-            res = self.client.chat_completion(messages=[{"role": "user", "content": prompt}], model=self.model, max_tokens=200)
+            res = self.client.chat_completion(
+                messages=[{"role": "user", "content": prompt}], 
+                model=self.model, 
+                max_tokens=400, # Increased token limit for detail
+                temperature=0.7
+            )
             return res.choices[0].message.content
-        except: return "Summary unavailable"
+        except: return "Summary unavailable at this time."
     
     def recommend_books(self, preferences: str) -> str:
         try:
@@ -244,37 +256,32 @@ def remove_from_wishlist_callback(username: str, title: str):
         st.error(f"❌ Remove Failed: {str(e)}")
 
 # ==========================================
-# ⭐ REVIEWS (NEW CALLBACK SYSTEM)
+# ⭐ REVIEWS (FIXED STATE)
 # ==========================================
 def submit_review_callback(title: str, username: str):
-    """
-    CALLBACK: Saves review immediately when button is clicked.
-    Uses Session State to get the rating and comment.
-    """
     try:
-        # Retrieve values from Session State keys
-        rating_key = f"rating_val_{title}"
-        comment_key = f"comment_val_{title}"
-        
-        rating = st.session_state.get(rating_key, 5)
-        comment = st.session_state.get(comment_key, "")
+        # Access session state by key
+        rating = st.session_state.get(f"rating_val_{title}", 5)
+        comment = st.session_state.get(f"comment_val_{title}", "")
         
         if not comment:
-            st.toast("⚠️ Please write a comment first!", icon="✍️")
+            st.toast("⚠️ Please write a comment!", icon="✍️")
             return
 
-        # Save to Google Sheet
         sheet = get_sheet("Reviews")
         sheet.append_row([title, username, rating, comment, datetime.now().strftime("%Y-%m-%d")])
         
-        # Success Feedback
         st.toast(f"✅ Review posted for '{title}'!", icon="🎉")
         
-        # Clear/Close form
-        st.session_state[f"review_open_{title}"] = False
+        # Clear the "active" review book to close the form
+        st.session_state["active_review_book"] = None
         
     except Exception as e:
         st.error(f"❌ Failed to save review: {str(e)}")
+
+def set_active_review_book(title: str):
+    # This keeps the form open even after clicking other things
+    st.session_state["active_review_book"] = title
 
 def get_reviews(title: str) -> List[Dict]:
     try:
@@ -318,32 +325,30 @@ def render_book_card(book: Dict, username: str):
         with col_b:
             if book["link"]: st.link_button("🔗 Preview", book["link"])
         with col_c:
-            if st.button("✍️ Write Review", key=f"btn_rev_{book['title']}"):
-                key = f"review_open_{book['title']}"
-                st.session_state[key] = not st.session_state.get(key, False)
+            # FIX: Use callback to set state
+            st.button("✍️ Write Review", key=f"btn_rev_{book['title']}",
+                      on_click=set_active_review_book, args=(book['title'],))
 
 def render_review_form(title: str, username: str):
-    # Check if form should be open
-    if st.session_state.get(f"review_open_{title}", False):
+    # Check if this specific book is the "active" one
+    if st.session_state.get("active_review_book") == title:
         st.divider()
         with st.container(border=True):
             st.subheader(f"📝 Review: {title}")
             
-            # 1. SLIDER with unique key
             st.slider("Rating (1-5)", 1, 5, 5, key=f"rating_val_{title}")
-            
-            # 2. TEXT AREA with unique key
             st.text_area("Your thoughts...", height=100, key=f"comment_val_{title}")
             
-            # 3. BUTTON with CALLBACK (The Fix!)
-            st.button(
-                "🚀 Post Review",
-                key=f"submit_rev_{title}",
-                on_click=submit_review_callback,  # <--- Callback triggers Save BEFORE reload
-                args=(title, username)
-            )
+            c1, c2 = st.columns([1, 4])
+            with c1:
+                st.button("🚀 Post", key=f"submit_rev_{title}", type="primary",
+                          on_click=submit_review_callback, args=(title, username))
+            with c2:
+                if st.button("Cancel", key=f"cancel_rev_{title}"):
+                    st.session_state["active_review_book"] = None
+                    st.rerun()
 
-    # Show existing reviews
+    # Always show existing reviews
     reviews = get_reviews(title)
     if reviews:
         with st.expander(f"📖 Read {len(reviews)} User Reviews", expanded=False):
@@ -382,15 +387,27 @@ def main_app():
     tab1, tab2, tab3, tab4 = st.tabs(["🔍 Discover", "💡 Recommendations", "📖 Library", "📄 PDF Study"])
     
     with tab1:
-        query = st.text_input("Search for books...", placeholder="Enter title or author")
-        if st.button("🔎 Search", use_container_width=True):
+        # Use session state to keep query alive
+        if "search_query" not in st.session_state: st.session_state.search_query = ""
+        
+        c_search, c_btn = st.columns([4, 1])
+        with c_search:
+            query = st.text_input("Search for books...", value=st.session_state.search_query, placeholder="Enter title or author")
+        with c_btn:
+            # Empty spacer to align button
+            st.write("")
+            st.write("") 
+            trigger_search = st.button("🔎 Search", use_container_width=True)
+
+        if trigger_search or query:
+            st.session_state.search_query = query
             if query:
-                with st.spinner("Searching..."):
-                    results = search_books(query)
+                # We don't use spinner on every rerun to avoid annoyance, only on new search logic if needed
+                results = search_books(query)
                 if results:
                     for book in results:
                         render_book_card(book, username)
-                        with st.expander("🤖 AI Summary", expanded=True):
+                        with st.expander("🤖 AI Summary (Professional)", expanded=True):
                             st.write(st.session_state.ai.summarize_book(book))
                         render_review_form(book['title'], username)
                 else: st.error(f"❌ No books found for '{query}'")
