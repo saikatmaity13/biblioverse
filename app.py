@@ -129,14 +129,21 @@ def get_app_reviews(book_title):
     except: return []
 
 # ==========================================
-# 🧠 AI & SEARCH
+# 🧠 AI & SEARCH (FAIL-SAFE VERSION)
 # ==========================================
 def search_google(query):
-    # Searches for a book and gets details
     url = "https://www.googleapis.com/books/v1/volumes"
+    
+    # ATTEMPT 1: Strict Search (English Books)
     params = {"q": query, "maxResults": 1, "langRestrict": "en", "printType": "books"}
+    
     try:
         res = requests.get(url, params=params).json()
+        if "items" not in res:
+            # ATTEMPT 2: Fallback (Broad Search - Any language, any type)
+            # This fixes "I couldn't find that book" errors
+            res = requests.get(url, params={"q": query, "maxResults": 1}).json()
+        
         if "items" in res:
             b = res["items"][0]["volumeInfo"]
             title = b.get("title", "Unknown")
@@ -149,7 +156,10 @@ def search_google(query):
                 "link": b.get("previewLink", b.get("infoLink")),
                 "found": True
             }
-    except: pass
+    except Exception as e:
+        print(f"Search Error: {e}")
+        pass
+    
     return {"found": False, "image": None}
 
 def ask_ai_summary(book_info):
@@ -169,6 +179,7 @@ def ask_ai_summary(book_info):
     ]
 
     try:
+        # Using Zephyr 7B (Ungated & Reliable)
         response = client.chat_completion(
             messages=messages,
             model="HuggingFaceH4/zephyr-7b-beta", 
@@ -177,7 +188,7 @@ def ask_ai_summary(book_info):
         )
         return response.choices[0].message.content
     except Exception as e:
-        return "⚠️ I couldn't generate a summary right now."
+        return f"⚠️ Summary unavailable (AI Error: {str(e)})"
 
 # ==========================================
 # 📄 PDF LOGIC
@@ -198,7 +209,6 @@ def process_pdf(f):
     return Chroma.from_documents(chunks, embeddings)
 
 def ask_pdf(question):
-    # Simple Q&A for PDF
     docs = vector_db.similarity_search(question, k=3)
     ctx = "\n".join([d.page_content for d in docs])
     client = InferenceClient(token=os.environ['HUGGINGFACEHUB_API_TOKEN'])
@@ -230,26 +240,24 @@ def main_app():
     with t1:
         st.info("💡 Type a book name below to get a summary!")
         
-        # Chat History container
+        # Chat History
         chat_container = st.container()
         
-        # Input at bottom
+        # Input
         if query := st.chat_input("Enter book name..."):
             
-            # 1. Search Google Books
+            # 1. Search Google Books (Fail-Safe)
             scout = search_google(query)
             
             # 2. Generate AI Summary
             if scout["found"]:
                 summary = ask_ai_summary(scout["text"])
             else:
-                summary = "I couldn't find that book. Try checking the spelling?"
+                summary = f"I couldn't find a book matching '{query}'. Try checking the spelling?"
 
-            # 3. Store in session state (History)
+            # 3. Store in History
             if "history" not in st.session_state: st.session_state.history = []
-            st.session_state.history.append({
-                "role": "user", "content": query
-            })
+            st.session_state.history.append({"role": "user", "content": query})
             st.session_state.history.append({
                 "role": "assistant", 
                 "content": summary, 
@@ -263,11 +271,10 @@ def main_app():
                     with st.chat_message(msg["role"]):
                         st.write(msg["content"])
                         
-                        # IF IT'S A BOOK RESULT, SHOW THE INTERACTIVE CARD
+                        # IF BOOK FOUND, SHOW CARD
                         if msg.get("book_data"):
                             b = msg["book_data"]
                             
-                            # Layout: Image Left, Details Right
                             c1, c2 = st.columns([1, 3])
                             with c1:
                                 if b["image"]: st.image(b["image"], width=120)
@@ -275,22 +282,20 @@ def main_app():
                                 st.subheader(b["title"])
                                 if b["stars"]: st.caption(f"Google Rating: {b['stars']} ({b['count']} votes)")
                                 
-                                # BUTTONS ROW
                                 b1, b2 = st.columns(2)
                                 with b1:
-                                    # ACTION 1: ADD TO WISHLIST
-                                    st.button("❤️ Add to Wishlist", key=f"add_{b['title']}_{len(st.session_state.history)}", 
+                                    st.button("❤️ Add to Wishlist", key=f"add_{b['title']}_{datetime.now()}", 
                                               on_click=save_to_wishlist, args=(user, b["title"]))
                                 with b2:
                                     if b["link"]: st.link_button("🔗 Google Reviews", b["link"])
 
-                            # ACTION 2: WRITE REVIEW (Expandable Form)
+                            # REVIEW FORM
                             with st.expander(f"✍️ Write a Review for {b['title']}"):
-                                with st.form(key=f"review_{b['title']}_{len(st.session_state.history)}"):
+                                with st.form(key=f"review_{b['title']}_{datetime.now()}"):
                                     st.write("What did you think?")
                                     u_rating = st.slider("Rating", 1, 5, 5)
                                     u_comment = st.text_area("Your review...")
-                                    if st.form_submit_button("Submit Review"):
+                                    if st.form_submit_button("Submit"):
                                         if save_review(b["title"], user, u_rating, u_comment):
                                             st.success("Review Saved!")
 
