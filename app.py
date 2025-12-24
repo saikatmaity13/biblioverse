@@ -29,11 +29,9 @@ from typing import Dict, List, Optional, Tuple
 # ==========================================
 st.set_page_config(page_title="BookBot Pro", page_icon="📚", layout="wide")
 
-# Custom CSS
 st.markdown("""
 <style>
     .stButton>button {border-radius: 5px; font-weight: 600;}
-    .metric-card {background: #f0f2f6; padding: 15px; border-radius: 8px;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -79,6 +77,7 @@ def get_sheet(name: str):
     try:
         return client.open("BookBot_Data").worksheet(name)
     except:
+        # Auto-create missing tab
         sh = client.open("BookBot_Data")
         ws = sh.add_worksheet(title=name, rows="1000", cols="5")
         
@@ -113,12 +112,8 @@ def login_user(username: str, password: str) -> Tuple[str, str]:
 
 def get_user_stats(username: str) -> Dict:
     try:
-        wishlist_data = get_sheet("Wishlist").get_all_values()
-        review_data = get_sheet("Reviews").get_all_values()
-        
-        w_count = len([r for r in wishlist_data if len(r) > 1 and r[0] == username])
-        r_count = len([r for r in review_data if len(r) > 1 and r[1] == username])
-        
+        w_count = len([r for r in get_sheet("Wishlist").get_all_values() if len(r) > 1 and r[0] == username])
+        r_count = len([r for r in get_sheet("Reviews").get_all_values() if len(r) > 1 and r[1] == username])
         return {"wishlist": w_count, "reviews": r_count}
     except:
         return {"wishlist": 0, "reviews": 0}
@@ -130,7 +125,7 @@ def search_books(query: str) -> List[Dict]:
     url = "https://www.googleapis.com/books/v1/volumes"
     api_key = st.secrets.get("GOOGLE_BOOKS_KEY")
     
-    # 1 Result Only + India Fix
+    # 1 Result Only + India
     params = {"q": query, "maxResults": 1, "langRestrict": "en", "country": "IN"}
     if api_key: params["key"] = api_key
     
@@ -156,8 +151,7 @@ def search_books(query: str) -> List[Dict]:
                     "link": info.get("previewLink", info.get("infoLink")),
                     "publisher": info.get("publisher", "Unknown"),
                     "date": info.get("publishedDate", "Unknown"),
-                    "pages": info.get("pageCount", 0),
-                    "categories": ", ".join(info.get("categories", ["General"]))
+                    "pages": info.get("pageCount", 0)
                 })
         return books
     except Exception as e:
@@ -209,36 +203,25 @@ def process_pdf(file) -> Optional[Chroma]:
     except: return None
 
 # ==========================================
-# 📖 WISHLIST (CALLBACK METHOD)
+# 📖 WISHLIST (CALLBACK)
 # ==========================================
 def get_wishlist(username: str) -> List[Dict]:
     try:
         data = get_sheet("Wishlist").get_all_values()[1:]
         return [{"title": r[1], "date": r[2] if len(r) > 2 else "Unknown"} 
                 for r in data if len(r) > 1 and r[0] == username]
-    except Exception as e:
-        print(f"Wishlist Fetch Error: {e}")
-        return []
+    except: return []
 
 def add_to_wishlist_callback(username: str, title: str):
-    """
-    CALLBACK FUNCTION: Runs BEFORE the app refreshes.
-    This guarantees the data is sent to Google Sheets.
-    """
     try:
         sheet = get_sheet("Wishlist")
         existing = sheet.get_all_values()
-        
-        # Check duplicates
         for row in existing:
             if len(row) > 1 and row[0] == username and row[1] == title:
-                st.toast(f"⚠️ '{title}' is already in your wishlist!", icon="ℹ️")
+                st.toast(f"⚠️ '{title}' already in wishlist!", icon="ℹ️")
                 return
-
-        # Add new
         sheet.append_row([username, title, datetime.now().strftime("%Y-%m-%d")])
         st.toast(f"✅ Added '{title}' to Wishlist!", icon="🎉")
-        
     except Exception as e:
         st.error(f"❌ Save Failed: {str(e)}")
 
@@ -255,14 +238,17 @@ def remove_from_wishlist_callback(username: str, title: str):
         st.error(f"❌ Remove Failed: {str(e)}")
 
 # ==========================================
-# ⭐ REVIEWS
+# ⭐ REVIEWS (FIXED LOGIC)
 # ==========================================
 def add_review(title: str, username: str, rating: int, comment: str) -> bool:
+    """Adds a review to the sheet, with error printing."""
     try:
         sheet = get_sheet("Reviews")
         sheet.append_row([title, username, rating, comment, datetime.now().strftime("%Y-%m-%d")])
         return True
-    except: return False
+    except Exception as e:
+        st.error(f"❌ Failed to save review: {str(e)}")
+        return False
 
 def get_reviews(title: str) -> List[Dict]:
     try:
@@ -291,48 +277,53 @@ def render_book_card(book: Dict, username: str):
         st.caption(f"by {book['authors']}")
         
         if book["rating"] > 0:
-            st.caption(f"{'⭐' * int(book['rating'])} ({book['rating']}/5) - {book['rating_count']} reviews")
+            st.caption(f"{'⭐' * int(book['rating'])} ({book['rating']}/5) - {book['rating_count']} Google reviews")
         
+        # App Reviews Rating
+        avg, count = get_avg_rating(book['title'])
+        if count > 0:
+            st.caption(f"📱 BookBot Users: {'⭐' * int(avg)} ({avg:.1f}/5) - {count} reviews")
+
         st.write(f"**Publisher:** {book['publisher']} | **Published:** {book['date']}")
         
         col_a, col_b, col_c = st.columns(3)
-        
-        # 1. Wishlist Button (Using on_click Callback)
         with col_a:
-            st.button(
-                "❤️ Wishlist", 
-                key=f"w_{book['title']}_{datetime.now().microsecond}",
-                on_click=add_to_wishlist_callback,  # <--- THIS IS THE FIX
-                args=(username, book['title'])      # Passes data securely
-            )
-        
-        # 2. Preview Link
+            st.button("❤️ Wishlist", key=f"w_{book['title']}_{datetime.now().microsecond}",
+                      on_click=add_to_wishlist_callback, args=(username, book['title']))
         with col_b:
             if book["link"]: st.link_button("🔗 Preview", book["link"])
-        
-        # 3. Review Button
         with col_c:
-            if st.button("⭐ Review", key=f"r_{book['title']}"):
-                st.session_state[f"review_{book['title']}"] = True
+            # Toggle review form visibility
+            if st.button("⭐ Review", key=f"btn_rev_{book['title']}"):
+                # Toggle state logic
+                key = f"review_open_{book['title']}"
+                st.session_state[key] = not st.session_state.get(key, False)
 
 def render_review_form(title: str, username: str):
-    if st.session_state.get(f"review_{title}", False):
-        with st.expander(f"✍️ Review: {title}", expanded=True):
-            with st.form(key=f"form_{title}"):
-                rating = st.slider("Rating", 1, 5, 5)
-                comment = st.text_area("Your thoughts...")
-                if st.form_submit_button("Submit"):
-                    if add_review(title, username, rating, comment):
-                        st.success("✅ Review posted!")
-                        st.session_state[f"review_{title}"] = False
-                        st.rerun()
-    
+    # Only show if state is True
+    if st.session_state.get(f"review_open_{title}", False):
+        st.divider()
+        st.markdown(f"#### ✍️ Write a Review for *{title}*")
+        
+        with st.form(key=f"form_{title}"):
+            rating = st.slider("Rating", 1, 5, 5)
+            comment = st.text_area("Your thoughts...")
+            
+            # Submit Button
+            if st.form_submit_button("Post Review"):
+                if add_review(title, username, rating, comment):
+                    st.success("✅ Review Posted Successfully!")
+                    # Optional: Close form after success
+                    st.session_state[f"review_open_{title}"] = False
+                    st.rerun()
+
+    # Show existing reviews below
     reviews = get_reviews(title)
     if reviews:
-        with st.expander(f"📖 {len(reviews)} Reviews"):
+        with st.expander(f"📖 Read {len(reviews)} User Reviews"):
             for r in reviews[-5:]:
-                st.markdown(f"**{r['user']}** {'⭐' * r['rating']}\n\n{r['comment']}\n\n*{r['date']}*")
-                st.divider()
+                st.markdown(f"**{r['user']}** {'⭐' * r['rating']} ({r['date']})")
+                st.info(r['comment'])
 
 # ==========================================
 # 🏠 MAIN APP
@@ -401,7 +392,6 @@ def main_app():
             df.index = range(1, len(df) + 1)
             st.dataframe(df, use_container_width=True)
             
-            # Using Callback for Remove as well
             to_remove = st.selectbox("Select to remove:", [w['title'] for w in wishlist])
             st.button("Remove Book", on_click=remove_from_wishlist_callback, args=(username, to_remove))
         else:
