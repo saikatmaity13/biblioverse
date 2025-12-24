@@ -263,7 +263,7 @@ def remove_from_wishlist_callback(username: str, title: str):
         for i, row in enumerate(data):
             if len(row) > 1 and row[0] == username and row[1] == title:
                 sheet.delete_rows(i + 1)
-                st.toast(f"🗑️ Removed '{title}'", icon="✅")
+                st.toast(f" Removed '{title}'", icon="✅")
                 return
     except Exception as e:
         st.error(f"❌ Remove Failed: {str(e)}")
@@ -384,7 +384,7 @@ def main_app():
         else: st.info("Empty")
         
         st.divider()
-        if st.button("🚪 Logout", use_container_width=True):
+        if st.button(" Logout", use_container_width=True):
             st.session_state.clear()
             st.rerun()
     
@@ -420,7 +420,7 @@ def main_app():
                 st.markdown(st.session_state.ai.recommend_books(prefs))
 
     with tab3:
-        st.header(f"📖 {username}'s Library")
+        st.header(f" {username}'s Library")
         wishlist = get_wishlist(username)
         if wishlist:
             df = pd.DataFrame(wishlist)
@@ -428,7 +428,7 @@ def main_app():
             st.dataframe(df, use_container_width=True)
             to_remove = st.selectbox("Select to remove:", [w['title'] for w in wishlist])
             st.button("Remove Book", on_click=remove_from_wishlist_callback, args=(username, to_remove))
-        else: st.info("📚 Your library is empty!")
+        else: st.info(" Your library is empty!")
 
     with tab4:
         pdf = st.file_uploader("Upload PDF", type="pdf")
@@ -451,7 +451,7 @@ def main_app():
 # 🔐 LOGIN
 # ==========================================
 if "username" not in st.session_state:
-    st.title("🔐 BookBot Login")
+    st.title("Welcome to Biblioverse")
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         with st.form("login"):
@@ -468,4 +468,5 @@ if "username" not in st.session_state:
                     else: st.error(msg)
 else:
     main_app()
+
 
