@@ -60,7 +60,7 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 # ==========================================
-# ☁️ DATABASE MANAGER
+#  DATABASE MANAGER
 # ==========================================
 @st.cache_resource
 def get_sheets_client():
@@ -183,11 +183,11 @@ class AIHelper:
             f"Write a professional critique of '{book['title']}' by {book['authors']}.\n"
             f"Context: {book['description'][:800]}\n\n"
             "Structure your response exactly like this:\n\n"
-            "### 🖋️ Literary Analysis\n"
+            "###  Literary Analysis\n"
             "[Write a sophisticated paragraph analyzing the plot's premise and the author's writing style. Discuss the narrative voice.]\n\n"
-            "### 🗝️ Core Themes\n"
+            "###  Core Themes\n"
             "[Analyze 2-3 major themes (e.g., morality, identity, power) explored in the text. Be specific.]\n\n"
-            "### ⚖️ The Verdict\n"
+            "###  The Verdict\n"
             "[A final, authoritative sentence on why this book matters and who it is for.]"
         )
         
@@ -249,12 +249,12 @@ def add_to_wishlist_callback(username: str, title: str):
         existing = sheet.get_all_values()
         for row in existing:
             if len(row) > 1 and row[0] == username and row[1] == title:
-                st.toast(f"⚠️ '{title}' already in wishlist!", icon="ℹ️")
+                st.toast(f" '{title}' already in wishlist!", icon="ℹ️")
                 return
         sheet.append_row([username, title, datetime.now().strftime("%Y-%m-%d")])
-        st.toast(f"✅ Added '{title}' to Wishlist!", icon="🎉")
+        st.toast(f" Added '{title}' to Wishlist!", icon="🎉")
     except Exception as e:
-        st.error(f"❌ Save Failed: {str(e)}")
+        st.error(f" Save Failed: {str(e)}")
 
 def remove_from_wishlist_callback(username: str, title: str):
     try:
@@ -277,13 +277,13 @@ def submit_review_callback(title: str, username: str):
         comment = st.session_state.get(f"comment_val_{title}", "")
         
         if not comment:
-            st.toast("⚠️ Please write a comment!", icon="✍️")
+            st.toast(" Please write a comment!", icon="")
             return
 
         sheet = get_sheet("Reviews")
         sheet.append_row([title, username, rating, comment, datetime.now().strftime("%Y-%m-%d")])
         
-        st.toast(f"✅ Review posted for '{title}'!", icon="🎉")
+        st.toast(f" Review posted for '{title}'!", icon="🎉")
         st.session_state["active_review_book"] = None # Close form
         
     except Exception as e:
@@ -329,19 +329,19 @@ def render_book_card(book: Dict, username: str):
         
         col_a, col_b, col_c = st.columns(3)
         with col_a:
-            st.button("❤️ Wishlist", key=f"w_{book['title']}_{datetime.now().microsecond}",
+            st.button(" Wishlist", key=f"w_{book['title']}_{datetime.now().microsecond}",
                       on_click=add_to_wishlist_callback, args=(username, book['title']))
         with col_b:
-            if book["link"]: st.link_button("🔗 Preview", book["link"])
+            if book["link"]: st.link_button(" Preview", book["link"])
         with col_c:
-            st.button("✍️ Write Review", key=f"btn_rev_{book['title']}",
+            st.button(" Write Review", key=f"btn_rev_{book['title']}",
                       on_click=set_active_review_book, args=(book['title'],))
 
 def render_review_form(title: str, username: str):
     if st.session_state.get("active_review_book") == title:
         st.divider()
         with st.container(border=True):
-            st.subheader(f"📝 Review: {title}")
+            st.subheader(f" Review: {title}")
             st.slider("Rating (1-5)", 1, 5, 5, key=f"rating_val_{title}")
             st.text_area("Your thoughts...", height=100, key=f"comment_val_{title}")
             
@@ -376,7 +376,7 @@ def main_app():
         c2.metric("Reviews", stats["reviews"])
         
         st.divider()
-        st.subheader("❤️ My Wishlist")
+        st.subheader(" My Wishlist")
         wishlist = get_wishlist(username)
         if wishlist:
             for item in wishlist[-5:]:
@@ -388,7 +388,7 @@ def main_app():
             st.session_state.clear()
             st.rerun()
     
-    st.title("📚 BookBot Pro")
+    st.title("Biblioverse")
     tab1, tab2, tab3, tab4 = st.tabs(["🔍 Discover", "💡 Recommendations", "📖 Library", "📄 PDF Study"])
     
     with tab1:
@@ -408,14 +408,14 @@ def main_app():
                 if results:
                     for book in results:
                         render_book_card(book, username)
-                        with st.expander("🧐 Professional Critic's Analysis", expanded=True):
+                        with st.expander(" About The Book", expanded=True):
                             st.markdown(f"<div class='review-text'>{st.session_state.ai.summarize_book(book)}</div>", unsafe_allow_html=True)
                         render_review_form(book['title'], username)
-                else: st.error(f"❌ No books found for '{query}'")
+                else: st.error(f" No books found for '{query}'")
 
     with tab2:
         prefs = st.text_area("What do you like?")
-        if st.button("✨ Get Recommendations", use_container_width=True) and prefs:
+        if st.button(" Get Recommendations", use_container_width=True) and prefs:
             with st.spinner("Thinking..."):
                 st.markdown(st.session_state.ai.recommend_books(prefs))
 
@@ -439,7 +439,7 @@ def main_app():
                     if db:
                         st.session_state.pdf_db = db
                         st.session_state.pdf_name = pdf.name
-                        st.success("✅ PDF loaded!")
+                        st.success(" PDF loaded!")
             if "pdf_db" in st.session_state:
                 q = st.text_input("Ask PDF:")
                 if st.button("Analyze", use_container_width=True) and q:
@@ -468,3 +468,4 @@ if "username" not in st.session_state:
                     else: st.error(msg)
 else:
     main_app()
+
