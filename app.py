@@ -77,6 +77,7 @@ def get_sheet(name: str):
     try:
         return client.open("BookBot_Data").worksheet(name)
     except:
+        # Auto-create missing tab
         sh = client.open("BookBot_Data")
         ws = sh.add_worksheet(title=name, rows="1000", cols="5")
         
@@ -106,6 +107,7 @@ def login_user(username: str, password: str) -> Tuple[str, str]:
             if i == 0: continue
             if len(row) >= 2 and row[0].strip().lower() == clean_user:
                 stored = row[1].strip()
+                # Hybrid Login (Supports Old & New Passwords)
                 if stored == hashed_pass or stored == clean_pass:
                     return "success", "Login successful!"
                 return "wrong_pass", "Incorrect password"
@@ -207,7 +209,7 @@ def process_pdf(file) -> Optional[Chroma]:
     except: return None
 
 # ==========================================
-# 📖 WISHLIST
+# 📖 WISHLIST (CALLBACK)
 # ==========================================
 def get_wishlist(username: str) -> List[Dict]:
     try:
@@ -242,16 +244,37 @@ def remove_from_wishlist_callback(username: str, title: str):
         st.error(f"❌ Remove Failed: {str(e)}")
 
 # ==========================================
-# ⭐ REVIEWS (ENHANCED)
+# ⭐ REVIEWS (NEW CALLBACK SYSTEM)
 # ==========================================
-def add_review(title: str, username: str, rating: int, comment: str) -> bool:
+def submit_review_callback(title: str, username: str):
+    """
+    CALLBACK: Saves review immediately when button is clicked.
+    Uses Session State to get the rating and comment.
+    """
     try:
+        # Retrieve values from Session State keys
+        rating_key = f"rating_val_{title}"
+        comment_key = f"comment_val_{title}"
+        
+        rating = st.session_state.get(rating_key, 5)
+        comment = st.session_state.get(comment_key, "")
+        
+        if not comment:
+            st.toast("⚠️ Please write a comment first!", icon="✍️")
+            return
+
+        # Save to Google Sheet
         sheet = get_sheet("Reviews")
         sheet.append_row([title, username, rating, comment, datetime.now().strftime("%Y-%m-%d")])
-        return True
+        
+        # Success Feedback
+        st.toast(f"✅ Review posted for '{title}'!", icon="🎉")
+        
+        # Clear/Close form
+        st.session_state[f"review_open_{title}"] = False
+        
     except Exception as e:
         st.error(f"❌ Failed to save review: {str(e)}")
-        return False
 
 def get_reviews(title: str) -> List[Dict]:
     try:
@@ -295,33 +318,30 @@ def render_book_card(book: Dict, username: str):
         with col_b:
             if book["link"]: st.link_button("🔗 Preview", book["link"])
         with col_c:
-            # RENAMED BUTTON TO BE CLEARER
             if st.button("✍️ Write Review", key=f"btn_rev_{book['title']}"):
                 key = f"review_open_{book['title']}"
                 st.session_state[key] = not st.session_state.get(key, False)
 
 def render_review_form(title: str, username: str):
-    # Only show if state is True
+    # Check if form should be open
     if st.session_state.get(f"review_open_{title}", False):
-        
-        # --- NEW REVIEW UI ---
-        st.markdown("---")
-        with st.container(border=True): # Makes it look like a card
-            st.subheader(f"📝 Your Opinion on '{title}'")
+        st.divider()
+        with st.container(border=True):
+            st.subheader(f"📝 Review: {title}")
             
-            with st.form(key=f"form_{title}"):
-                c1, c2 = st.columns([1, 2])
-                with c1:
-                    rating = st.slider("Rating (1-5)", 1, 5, 5)
-                with c2:
-                    st.caption("Share your thoughts:")
-                    comment = st.text_area("Write your review here...", height=100)
-                
-                if st.form_submit_button("🚀 Post Review", use_container_width=True):
-                    if add_review(title, username, rating, comment):
-                        st.success("✅ Review Posted Successfully!")
-                        st.session_state[f"review_open_{title}"] = False
-                        st.rerun()
+            # 1. SLIDER with unique key
+            st.slider("Rating (1-5)", 1, 5, 5, key=f"rating_val_{title}")
+            
+            # 2. TEXT AREA with unique key
+            st.text_area("Your thoughts...", height=100, key=f"comment_val_{title}")
+            
+            # 3. BUTTON with CALLBACK (The Fix!)
+            st.button(
+                "🚀 Post Review",
+                key=f"submit_rev_{title}",
+                on_click=submit_review_callback,  # <--- Callback triggers Save BEFORE reload
+                args=(title, username)
+            )
 
     # Show existing reviews
     reviews = get_reviews(title)
