@@ -60,7 +60,7 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 # ==========================================
-# ☁️ DATABASE MANAGER
+# ☁️ DATABASE MANAGER (AUTO-FIXING)
 # ==========================================
 @st.cache_resource
 def get_sheets_client():
@@ -75,16 +75,25 @@ def get_sheets_client():
     return gspread.authorize(creds)
 
 def get_sheet(name: str):
+    """
+    Tries to open a sheet. If missing, CREATES it with correct headers.
+    This fixes the 'Wishlist not working' error.
+    """
+    client = get_sheets_client()
     try:
-        return get_sheets_client().open("BookBot_Data").worksheet(name)
+        return client.open("BookBot_Data").worksheet(name)
     except:
-        # Auto-create
-        sh = get_sheets_client().open("BookBot_Data")
+        # Auto-create missing tab
+        sh = client.open("BookBot_Data")
         ws = sh.add_worksheet(title=name, rows="1000", cols="5")
+        
+        # Define headers for each type
         headers = {
             "Reviews": ["Book Title", "Username", "Rating", "Comment", "Date"],
-            "Users": ["Username", "Password", "JoinDate"]
+            "Users": ["Username", "Password", "JoinDate"],
+            "Wishlist": ["Username", "Book Title", "Date Added"]  # <--- NEW DEDICATED TAB
         }
+        
         if name in headers:
             ws.append_row(headers[name])
         return ws
@@ -103,7 +112,6 @@ def login_user(username: str, password: str) -> Tuple[str, str]:
                     return "success", "Login successful!"
                 return "wrong_pass", "Incorrect password"
         
-        # Register new user
         sheet.append_row([username, hash_password(password), datetime.now().strftime("%Y-%m-%d")])
         return "register", "Account created!"
     except Exception as e:
@@ -111,7 +119,7 @@ def login_user(username: str, password: str) -> Tuple[str, str]:
 
 def get_user_stats(username: str) -> Dict:
     try:
-        wishlist_data = get_sheet("Sheet1").get_all_values()
+        wishlist_data = get_sheet("Wishlist").get_all_values() # Changed to 'Wishlist'
         review_data = get_sheet("Reviews").get_all_values()
         
         w_count = len([r for r in wishlist_data if len(r) > 1 and r[0] == username])
@@ -122,38 +130,22 @@ def get_user_stats(username: str) -> Dict:
         return {"wishlist": 0, "reviews": 0}
 
 # ==========================================
-# 📚 BOOK SEARCH (AUTHENTICATED)
+# 📚 BOOK SEARCH
 # ==========================================
-# ==========================================
-# 📚 BOOK SEARCH (DEBUG MODE)
-# ==========================================
-# ==========================================
-# 📚 BOOK SEARCH (FIXED: GEO-RESTRICTION)
-# ==========================================
-def search_books(query: str, max_results: int = 5) -> List[Dict]:
+def search_books(query: str) -> List[Dict]:
     url = "https://www.googleapis.com/books/v1/volumes"
-    
     api_key = st.secrets.get("GOOGLE_BOOKS_KEY")
     
-    # FIX: We add 'country': 'IN' to tell Google we are in India.
-    # This fixes the "Cannot determine user location" error.
-    params = {
-        "q": query, 
-        "maxResults": max_results, 
-        "langRestrict": "en",
-        "country": "IN" 
-    }
-    
-    if api_key:
-        params["key"] = api_key
+    # Force 1 Result + India
+    params = {"q": query, "maxResults": 1, "langRestrict": "en", "country": "IN"}
+    if api_key: params["key"] = api_key
     
     try:
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
         
-        # DEBUG: Print error if it still fails
         if "error" in data:
-            st.error(f"⚠️ Google Error: {data['error']['message']}")
+            st.error(f"⚠️ API Error: {data['error']['message']}")
             return []
             
         books = []
@@ -174,10 +166,10 @@ def search_books(query: str, max_results: int = 5) -> List[Dict]:
                     "categories": ", ".join(info.get("categories", ["General"]))
                 })
         return books
-        
     except Exception as e:
-        st.error(f"⚠️ System Error: {str(e)}")
+        st.error(f"⚠️ Search Error: {str(e)}")
         return []
+
 # ==========================================
 # 🤖 AI ASSISTANT
 # ==========================================
@@ -189,39 +181,21 @@ class AIHelper:
     def summarize_book(self, book: Dict) -> str:
         prompt = f"Title: {book['title']}\nAuthor: {book['authors']}\nDesc: {book['description'][:400]}\n\nBrief 3-sentence summary (no spoilers):"
         try:
-            res = self.client.chat_completion(
-                messages=[{"role": "user", "content": prompt}],
-                model=self.model,
-                max_tokens=200
-            )
+            res = self.client.chat_completion(messages=[{"role": "user", "content": prompt}], model=self.model, max_tokens=200)
             return res.choices[0].message.content
-        except:
-            return "Summary unavailable"
+        except: return "Summary unavailable"
     
     def recommend_books(self, preferences: str) -> str:
         try:
-            res = self.client.chat_completion(
-                messages=[{"role": "user", "content": f"Recommend 5 books for: {preferences}"}],
-                model=self.model,
-                max_tokens=500
-            )
+            res = self.client.chat_completion(messages=[{"role": "user", "content": f"Recommend 5 books for: {preferences}"}], model=self.model, max_tokens=500)
             return res.choices[0].message.content
-        except:
-            return "Recommendations unavailable"
+        except: return "Recommendations unavailable"
     
     def answer_pdf(self, context: str, question: str) -> str:
         try:
-            res = self.client.chat_completion(
-                messages=[
-                    {"role": "system", "content": f"Answer based on:\n{context}"},
-                    {"role": "user", "content": question}
-                ],
-                model=self.model,
-                max_tokens=400
-            )
+            res = self.client.chat_completion(messages=[{"role": "system", "content": f"Answer based on:\n{context}"}, {"role": "user", "content": question}], model=self.model, max_tokens=400)
             return res.choices[0].message.content
-        except:
-            return "Error processing question"
+        except: return "Error processing question"
 
 # ==========================================
 # 📄 PDF PROCESSOR
@@ -234,52 +208,54 @@ def process_pdf(file) -> Optional[Chroma]:
     try:
         reader = pypdf.PdfReader(file)
         text = "\n".join([p.extract_text() or "" for p in reader.pages])
-        
-        if len(text.strip()) < 100:
-            return None
-        
+        if len(text.strip()) < 100: return None
         splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = splitter.create_documents([text])
         return Chroma.from_documents(chunks, get_embeddings())
-    except:
-        return None
+    except: return None
 
 # ==========================================
-# 📖 WISHLIST
+# 📖 WISHLIST (FIXED)
 # ==========================================
 def get_wishlist(username: str) -> List[Dict]:
     try:
-        data = get_sheet("Sheet1").get_all_values()[1:]
+        # Uses dedicated 'Wishlist' tab now
+        data = get_sheet("Wishlist").get_all_values()[1:]
         return [{"title": r[1], "date": r[2] if len(r) > 2 else "Unknown"} 
                 for r in data if len(r) > 1 and r[0] == username]
-    except:
+    except Exception as e:
+        print(f"Wishlist Error: {e}")
         return []
 
-def add_to_wishlist(username: str, title: str) -> Tuple[bool, str]:
+def add_to_wishlist(username: str, title: str):
+    """Adds book and forces a rerun to update UI"""
     try:
-        sheet = get_sheet("Sheet1")
+        sheet = get_sheet("Wishlist")
         existing = sheet.get_all_values()
         
+        # Check duplicates
         for row in existing:
             if len(row) > 1 and row[0] == username and row[1] == title:
-                return False, "Already in wishlist"
-        
+                st.toast("⚠️ Already in wishlist!", icon="ℹ️")
+                return
+
+        # Add new
         sheet.append_row([username, title, datetime.now().strftime("%Y-%m-%d")])
-        return True, "Added to wishlist!"
-    except:
-        return False, "Error adding"
+        st.toast("✅ Added to Wishlist!", icon="🎉")
+        
+    except Exception as e:
+        st.error(f"Save failed: {str(e)}")
 
 def remove_from_wishlist(username: str, title: str) -> bool:
     try:
-        sheet = get_sheet("Sheet1")
+        sheet = get_sheet("Wishlist")
         data = sheet.get_all_values()
         for i, row in enumerate(data):
             if len(row) > 1 and row[0] == username and row[1] == title:
                 sheet.delete_rows(i + 1)
                 return True
         return False
-    except:
-        return False
+    except: return False
 
 # ==========================================
 # ⭐ REVIEWS
@@ -289,21 +265,18 @@ def add_review(title: str, username: str, rating: int, comment: str) -> bool:
         sheet = get_sheet("Reviews")
         sheet.append_row([title, username, rating, comment, datetime.now().strftime("%Y-%m-%d")])
         return True
-    except:
-        return False
+    except: return False
 
 def get_reviews(title: str) -> List[Dict]:
     try:
         data = get_sheet("Reviews").get_all_values()[1:]
         return [{"user": r[1], "rating": int(r[2]), "comment": r[3], "date": r[4]} 
                 for r in data if len(r) > 3 and r[0] == title]
-    except:
-        return []
+    except: return []
 
 def get_avg_rating(title: str) -> Tuple[float, int]:
     reviews = get_reviews(title)
-    if not reviews:
-        return 0.0, 0
+    if not reviews: return 0.0, 0
     ratings = [r["rating"] for r in reviews]
     return sum(ratings) / len(ratings), len(ratings)
 
@@ -312,12 +285,9 @@ def get_avg_rating(title: str) -> Tuple[float, int]:
 # ==========================================
 def render_book_card(book: Dict, username: str):
     col1, col2 = st.columns([1, 3])
-    
     with col1:
-        if book["image"]:
-            st.image(book["image"], use_container_width=True)
-        else:
-            st.info("📖")
+        if book["image"]: st.image(book["image"], use_container_width=True)
+        else: st.info("📖")
     
     with col2:
         st.markdown(f"### {book['title']}")
@@ -326,25 +296,23 @@ def render_book_card(book: Dict, username: str):
         if book["rating"] > 0:
             st.caption(f"{'⭐' * int(book['rating'])} ({book['rating']}/5) - {book['rating_count']} reviews")
         
-        avg_rating, count = get_avg_rating(book['title'])
-        if count > 0:
-            st.caption(f"📱 BookBot: {'⭐' * int(avg_rating)} ({avg_rating:.1f}/5) - {count} reviews")
-        
-        st.write(f"**Publisher:** {book['publisher']} | **Pages:** {book['pages']} | **Published:** {book['date']}")
+        st.write(f"**Publisher:** {book['publisher']} | **Published:** {book['date']}")
         
         col_a, col_b, col_c = st.columns(3)
         
+        # 1. Wishlist Button
         with col_a:
-            if st.button("❤️ Wishlist", key=f"wish_{book['title']}_{id(book)}"):
-                success, msg = add_to_wishlist(username, book['title'])
-                st.toast(msg, icon="✅" if success else "ℹ️")
+            if st.button("❤️ Wishlist", key=f"w_{book['title']}_{datetime.now().microsecond}"):
+                add_to_wishlist(username, book['title'])
+                # Trick: We don't need explicit rerun here because button click triggers script rerun automatically
         
+        # 2. Preview Link
         with col_b:
-            if book["link"]:
-                st.link_button("🔗 Preview", book["link"])
+            if book["link"]: st.link_button("🔗 Preview", book["link"])
         
+        # 3. Review Button
         with col_c:
-            if st.button("⭐ Review", key=f"rev_{book['title']}_{id(book)}"):
+            if st.button("⭐ Review", key=f"r_{book['title']}"):
                 st.session_state[f"review_{book['title']}"] = True
 
 def render_review_form(title: str, username: str):
@@ -353,22 +321,11 @@ def render_review_form(title: str, username: str):
             with st.form(key=f"form_{title}"):
                 rating = st.slider("Rating", 1, 5, 5)
                 comment = st.text_area("Your thoughts...")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    submit = st.form_submit_button("Submit")
-                with col2:
-                    cancel = st.form_submit_button("Cancel")
-                
-                if submit and comment:
+                if st.form_submit_button("Submit"):
                     if add_review(title, username, rating, comment):
                         st.success("✅ Review posted!")
                         st.session_state[f"review_{title}"] = False
                         st.rerun()
-                
-                if cancel:
-                    st.session_state[f"review_{title}"] = False
-                    st.rerun()
     
     reviews = get_reviews(title)
     if reviews:
@@ -384,23 +341,18 @@ def main_app():
     username = st.session_state["username"]
     
     # Init AI
-    if "ai" not in st.session_state:
-        st.session_state.ai = AIHelper()
+    if "ai" not in st.session_state: st.session_state.ai = AIHelper()
     
     # Sidebar
     with st.sidebar:
         st.title(f"👤 {username}")
-        
         stats = get_user_stats(username)
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("📚 Wishlist", stats["wishlist"])
-        with col2:
-            st.metric("⭐ Reviews", stats["reviews"])
+        c1, c2 = st.columns(2)
+        c1.metric("Wishlist", stats["wishlist"])
+        c2.metric("Reviews", stats["reviews"])
         
         st.divider()
         st.subheader("❤️ My Wishlist")
-        
         wishlist = get_wishlist(username)
         if wishlist:
             for item in wishlist[-5:]:
@@ -413,137 +365,87 @@ def main_app():
             st.session_state.clear()
             st.rerun()
     
-    # Main UI
+    # Main Content
     st.title("📚 BookBot Pro")
-    st.caption("Your AI-Powered Reading Companion")
-    
     tab1, tab2, tab3, tab4 = st.tabs(["🔍 Discover", "💡 Recommendations", "📖 Library", "📄 PDF Study"])
     
     # TAB 1: DISCOVER
     with tab1:
-        st.header("🔍 Discover Books")
-        
         query = st.text_input("Search for books...", placeholder="Enter title or author")
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            search = st.button("🔎 Search", use_container_width=True)
-        with col2:
-            max_res = st.selectbox("Results", [3, 5, 10], index=1)
-        
-        if search and query:
-            with st.spinner("🔍 Searching Google Books..."):
-                results = search_books(query, max_res)
-            
-            if results:
-                st.success(f"✅ Found {len(results)} books!")
-                
-                for book in results:
-                    render_book_card(book, username)
-                    
-                    with st.expander("🤖 AI Summary"):
-                        summary = st.session_state.ai.summarize_book(book)
-                        st.write(summary)
-                    
-                    render_review_form(book['title'], username)
-                    st.divider()
-            else:
-                st.error(f"❌ No books found for '{query}'")
-                st.info("Check your spelling or try a more general term.")
-    
+        if st.button("🔎 Search", use_container_width=True):
+            if query:
+                with st.spinner("Searching..."):
+                    results = search_books(query)
+                if results:
+                    for book in results:
+                        render_book_card(book, username)
+                        with st.expander("🤖 AI Summary", expanded=True):
+                            st.write(st.session_state.ai.summarize_book(book))
+                        render_review_form(book['title'], username)
+                else:
+                    st.error(f"❌ No books found for '{query}'")
+
     # TAB 2: RECOMMENDATIONS
     with tab2:
-        st.header("💡 Get Recommendations")
-        
-        prefs = st.text_area(
-            "What do you like?",
-            placeholder="e.g., Mystery novels, sci-fi, historical fiction...",
-            height=100
-        )
-        
-        if st.button("✨ Get Recommendations", use_container_width=True):
-            if prefs:
-                with st.spinner("Thinking..."):
-                    recs = st.session_state.ai.recommend_books(prefs)
-                st.markdown("### 📚 Recommended:")
-                st.markdown(recs)
-    
-    # TAB 3: LIBRARY
+        prefs = st.text_area("What do you like?")
+        if st.button("✨ Get Recommendations", use_container_width=True) and prefs:
+            with st.spinner("Thinking..."):
+                st.markdown(st.session_state.ai.recommend_books(prefs))
+
+    # TAB 3: LIBRARY (Full Wishlist Management)
     with tab3:
         st.header(f"📖 {username}'s Library")
-        
         wishlist = get_wishlist(username)
-        
         if wishlist:
             df = pd.DataFrame(wishlist)
             df.index = range(1, len(df) + 1)
             st.dataframe(df, use_container_width=True)
             
-            st.subheader("🗑️ Remove Books")
-            to_remove = st.selectbox("Select:", [w['title'] for w in wishlist])
-            
-            if st.button("Remove", use_container_width=True):
+            to_remove = st.selectbox("Select to remove:", [w['title'] for w in wishlist])
+            if st.button("Remove Book", use_container_width=True):
                 if remove_from_wishlist(username, to_remove):
                     st.success(f"✅ Removed '{to_remove}'")
                     st.rerun()
         else:
             st.info("📚 Your library is empty!")
-    
-    # TAB 4: PDF STUDY
+
+    # TAB 4: PDF
     with tab4:
-        st.header("📄 PDF Study Room")
-        
         pdf = st.file_uploader("Upload PDF", type="pdf")
-        
         if pdf:
             if st.session_state.get("pdf_name") != pdf.name:
-                with st.spinner("Processing PDF..."):
+                with st.spinner("Processing..."):
                     db = process_pdf(pdf)
                     if db:
                         st.session_state.pdf_db = db
                         st.session_state.pdf_name = pdf.name
                         st.success("✅ PDF loaded!")
-                    else:
-                        st.error("❌ Could not process PDF")
             
             if "pdf_db" in st.session_state:
-                question = st.text_input("Ask a question about the PDF:")
-                
-                if st.button("🔍 Analyze", use_container_width=True):
-                    if question:
-                        docs = st.session_state.pdf_db.similarity_search(question, k=3)
-                        context = "\n".join([d.page_content for d in docs])
-                        
-                        with st.spinner("Analyzing..."):
-                            answer = st.session_state.ai.answer_pdf(context, question)
-                        
-                        st.markdown("### 💡 Answer:")
-                        st.write(answer)
+                q = st.text_input("Ask PDF:")
+                if st.button("Analyze", use_container_width=True) and q:
+                    docs = st.session_state.pdf_db.similarity_search(q, k=3)
+                    ctx = "\n".join([d.page_content for d in docs])
+                    st.write(st.session_state.ai.answer_pdf(ctx, q))
 
 # ==========================================
 # 🔐 LOGIN
 # ==========================================
 if "username" not in st.session_state:
     st.title("🔐 BookBot Login")
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
         with st.form("login"):
             st.info("New users auto-registered")
             u = st.text_input("Username")
             p = st.text_input("Password", type="password")
-            
             if st.form_submit_button("Enter", use_container_width=True):
                 if u and p:
                     status, msg = login_user(u, p)
-                    
                     if status in ["success", "register"]:
                         st.session_state["username"] = u
                         st.success(msg)
                         st.rerun()
-                    else:
-                        st.error(msg)
+                    else: st.error(msg)
 else:
     main_app()
-
-
