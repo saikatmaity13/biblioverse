@@ -125,53 +125,77 @@ def get_user_stats(username: str) -> Dict:
 # 📚 BOOK SEARCH
 # ==========================================
 def search_books(query: str, max_results: int = 5) -> List[Dict]:
+    """Search Google Books API with multiple fallback strategies"""
     url = "https://www.googleapis.com/books/v1/volumes"
     
-    # Try multiple search strategies
+    # Try multiple search strategies in order
     search_strategies = [
-        {"q": query, "maxResults": max_results},  # Broad search first
-        {"q": f'intitle:"{query}"', "maxResults": max_results},  # Title search
-        {"q": query, "maxResults": max_results, "langRestrict": "en"},  # English only
-        {"q": query.replace(" ", "+"), "maxResults": max_results}  # Plus signs
+        # Strategy 1: Simple broad search
+        {"q": query, "maxResults": max_results},
+        
+        # Strategy 2: Search in title field
+        {"q": f"intitle:{query}", "maxResults": max_results},
+        
+        # Strategy 3: URL-encoded search
+        {"q": "+".join(query.split()), "maxResults": max_results},
+        
+        # Strategy 4: With English filter
+        {"q": query, "maxResults": max_results, "langRestrict": "en", "printType": "books"}
     ]
     
-    books = []
-    
-    for params in search_strategies:
+    for attempt, params in enumerate(search_strategies, 1):
         try:
-            res = requests.get(url, params=params, timeout=10).json()
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()  # Raise error for bad status codes
+            data = response.json()
             
-            if "items" in res and len(res["items"]) > 0:
-                for item in res["items"]:
+            # Check if we got results
+            if "items" in data and len(data["items"]) > 0:
+                books = []
+                
+                for item in data["items"]:
                     info = item.get("volumeInfo", {})
                     
-                    # Skip items without basic info
+                    # Must have at least a title
                     if not info.get("title"):
                         continue
                     
-                    books.append({
-                        "title": info.get("title", "Unknown"),
-                        "authors": ", ".join(info.get("authors", ["Unknown"])),
-                        "description": info.get("description", "No description available."),
-                        "image": info.get("imageLinks", {}).get("thumbnail", info.get("imageLinks", {}).get("smallThumbnail")),
-                        "rating": info.get("averageRating", 0),
-                        "rating_count": info.get("ratingsCount", 0),
+                    # Parse book data
+                    book = {
+                        "title": info.get("title", "Unknown Title"),
+                        "authors": ", ".join(info.get("authors", ["Unknown Author"])),
+                        "description": info.get("description", "No description available.")[:500],
+                        "image": None,
+                        "rating": float(info.get("averageRating", 0)),
+                        "rating_count": int(info.get("ratingsCount", 0)),
                         "link": info.get("previewLink") or info.get("infoLink") or "",
                         "publisher": info.get("publisher", "Unknown"),
                         "date": info.get("publishedDate", "Unknown"),
                         "pages": info.get("pageCount", 0),
                         "categories": ", ".join(info.get("categories", ["General"]))
-                    })
+                    }
+                    
+                    # Get best available image
+                    images = info.get("imageLinks", {})
+                    book["image"] = (images.get("thumbnail") or 
+                                   images.get("smallThumbnail") or 
+                                   images.get("small") or 
+                                   images.get("medium"))
+                    
+                    books.append(book)
                 
-                # If we found books, return them
                 if books:
                     return books[:max_results]
         
+        except requests.exceptions.RequestException as e:
+            print(f"Search strategy {attempt} failed: {e}")
+            continue
         except Exception as e:
-            print(f"Search attempt failed: {e}")
+            print(f"Unexpected error in strategy {attempt}: {e}")
             continue
     
-    return books
+    # If all strategies failed, return empty list
+    return []
 
 # ==========================================
 # 🤖 AI ASSISTANT
@@ -443,7 +467,20 @@ def main_app():
                     render_review_form(book['title'], username)
                     st.divider()
             else:
-                st.warning(f"No books found for '{query}'")
+                st.error(f"❌ No books found for '{query}'")
+                st.info("💡 Try: checking spelling, using author name, or fewer keywords")
+                
+                # Debug button
+                if st.button("🔍 Debug Search"):
+                    with st.expander("Debug Info", expanded=True):
+                        test_url = f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1"
+                        st.code(test_url)
+                        try:
+                            import requests
+                            r = requests.get(test_url, timeout=10)
+                            st.json(r.json())
+                        except Exception as e:
+                            st.error(f"Error: {e}")
     
     # TAB 2: RECOMMENDATIONS
     with tab2:
