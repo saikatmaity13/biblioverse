@@ -164,37 +164,35 @@ try:
 except: st.stop()
 
 def ask_ai_raw(sys_msg, user_msg):
-    # 1. Use a reliable model (Mistral)
-    api_url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+    # 1. Use Zephyr-7B (Most reliable free model on the new Router API)
+    api_url = "https://router.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta"
     
     headers = {"Authorization": f"Bearer {os.environ['HUGGINGFACEHUB_API_TOKEN']}"}
     
-    # 2. Use Standard Chat Format (Safest for Router API)
+    # 2. Use the correct system/user prompt format for Zephyr
     payload = {
-        "inputs": f"[INST] {sys_msg}\n{user_msg} [/INST]",
-        "parameters": {"max_new_tokens": 500, "temperature": 0.7}
+        "inputs": f"<|system|>\n{sys_msg}</s>\n<|user|>\n{user_msg}</s>\n<|assistant|>",
+        "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False}
     }
 
     try:
         response = requests.post(api_url, headers=headers, json=payload)
         
-        # 3. Handle "Model Loading" (503 Error)
+        # 3. Handle Model Loading (503)
         if response.status_code == 503:
-            return "⏳ AI is waking up... Wait 30 seconds and try again."
+            return "⏳ The AI is waking up... Please wait 30 seconds and click 'Search' again."
             
-        # 4. Handle other API errors
+        # 4. Handle other errors
         if response.status_code != 200:
-            return f"⚠️ Error {response.status_code}: {response.text}"
+            return f"⚠️ API Error {response.status_code}: {response.text}"
             
         output = response.json()
         
-        # 5. Extract text safely
+        # 5. Extract text
         if isinstance(output, list) and "generated_text" in output[0]:
             return output[0]["generated_text"]
-        elif isinstance(output, dict) and "error" in output:
-            return f"⚠️ API Error: {output['error']}"
             
-        return f"⚠️ Unknown Response: {output}"
+        return "⚠️ Empty response."
         
     except Exception as e:
         return f"⚠️ System Error: {str(e)}"
@@ -332,6 +330,7 @@ if "username" not in st.session_state:
                     st.warning("Please enter username and password.")
 else:
     main_app()
+
 
 
 
