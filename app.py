@@ -77,7 +77,6 @@ def get_sheet(name: str):
     try:
         return client.open("BookBot_Data").worksheet(name)
     except:
-        # Auto-create missing tab
         sh = client.open("BookBot_Data")
         ws = sh.add_worksheet(title=name, rows="1000", cols="5")
         
@@ -97,15 +96,21 @@ def get_sheet(name: str):
 def login_user(username: str, password: str) -> Tuple[str, str]:
     try:
         sheet = get_sheet("Users")
-        records = sheet.get_all_values()[1:]
+        records = sheet.get_all_values()
         
-        for row in records:
-            if len(row) >= 2 and row[0].lower() == username.lower():
-                if row[1] == hash_password(password):
+        clean_user = username.strip().lower()
+        clean_pass = password.strip()
+        hashed_pass = hash_password(clean_pass)
+        
+        for i, row in enumerate(records):
+            if i == 0: continue
+            if len(row) >= 2 and row[0].strip().lower() == clean_user:
+                stored = row[1].strip()
+                if stored == hashed_pass or stored == clean_pass:
                     return "success", "Login successful!"
                 return "wrong_pass", "Incorrect password"
         
-        sheet.append_row([username, hash_password(password), datetime.now().strftime("%Y-%m-%d")])
+        sheet.append_row([clean_user, hashed_pass, datetime.now().strftime("%Y-%m-%d")])
         return "register", "Account created!"
     except Exception as e:
         return "error", str(e)
@@ -125,7 +130,6 @@ def search_books(query: str) -> List[Dict]:
     url = "https://www.googleapis.com/books/v1/volumes"
     api_key = st.secrets.get("GOOGLE_BOOKS_KEY")
     
-    # 1 Result Only + India
     params = {"q": query, "maxResults": 1, "langRestrict": "en", "country": "IN"}
     if api_key: params["key"] = api_key
     
@@ -203,7 +207,7 @@ def process_pdf(file) -> Optional[Chroma]:
     except: return None
 
 # ==========================================
-# 📖 WISHLIST (CALLBACK)
+# 📖 WISHLIST
 # ==========================================
 def get_wishlist(username: str) -> List[Dict]:
     try:
@@ -238,10 +242,9 @@ def remove_from_wishlist_callback(username: str, title: str):
         st.error(f"❌ Remove Failed: {str(e)}")
 
 # ==========================================
-# ⭐ REVIEWS (FIXED LOGIC)
+# ⭐ REVIEWS (ENHANCED)
 # ==========================================
 def add_review(title: str, username: str, rating: int, comment: str) -> bool:
-    """Adds a review to the sheet, with error printing."""
     try:
         sheet = get_sheet("Reviews")
         sheet.append_row([title, username, rating, comment, datetime.now().strftime("%Y-%m-%d")])
@@ -279,7 +282,6 @@ def render_book_card(book: Dict, username: str):
         if book["rating"] > 0:
             st.caption(f"{'⭐' * int(book['rating'])} ({book['rating']}/5) - {book['rating_count']} Google reviews")
         
-        # App Reviews Rating
         avg, count = get_avg_rating(book['title'])
         if count > 0:
             st.caption(f"📱 BookBot Users: {'⭐' * int(avg)} ({avg:.1f}/5) - {count} reviews")
@@ -293,36 +295,40 @@ def render_book_card(book: Dict, username: str):
         with col_b:
             if book["link"]: st.link_button("🔗 Preview", book["link"])
         with col_c:
-            # Toggle review form visibility
-            if st.button("⭐ Review", key=f"btn_rev_{book['title']}"):
-                # Toggle state logic
+            # RENAMED BUTTON TO BE CLEARER
+            if st.button("✍️ Write Review", key=f"btn_rev_{book['title']}"):
                 key = f"review_open_{book['title']}"
                 st.session_state[key] = not st.session_state.get(key, False)
 
 def render_review_form(title: str, username: str):
     # Only show if state is True
     if st.session_state.get(f"review_open_{title}", False):
-        st.divider()
-        st.markdown(f"#### ✍️ Write a Review for *{title}*")
         
-        with st.form(key=f"form_{title}"):
-            rating = st.slider("Rating", 1, 5, 5)
-            comment = st.text_area("Your thoughts...")
+        # --- NEW REVIEW UI ---
+        st.markdown("---")
+        with st.container(border=True): # Makes it look like a card
+            st.subheader(f"📝 Your Opinion on '{title}'")
             
-            # Submit Button
-            if st.form_submit_button("Post Review"):
-                if add_review(title, username, rating, comment):
-                    st.success("✅ Review Posted Successfully!")
-                    # Optional: Close form after success
-                    st.session_state[f"review_open_{title}"] = False
-                    st.rerun()
+            with st.form(key=f"form_{title}"):
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    rating = st.slider("Rating (1-5)", 1, 5, 5)
+                with c2:
+                    st.caption("Share your thoughts:")
+                    comment = st.text_area("Write your review here...", height=100)
+                
+                if st.form_submit_button("🚀 Post Review", use_container_width=True):
+                    if add_review(title, username, rating, comment):
+                        st.success("✅ Review Posted Successfully!")
+                        st.session_state[f"review_open_{title}"] = False
+                        st.rerun()
 
-    # Show existing reviews below
+    # Show existing reviews
     reviews = get_reviews(title)
     if reviews:
-        with st.expander(f"📖 Read {len(reviews)} User Reviews"):
+        with st.expander(f"📖 Read {len(reviews)} User Reviews", expanded=False):
             for r in reviews[-5:]:
-                st.markdown(f"**{r['user']}** {'⭐' * r['rating']} ({r['date']})")
+                st.markdown(f"**{r['user']}** {'⭐' * r['rating']} • *{r['date']}*")
                 st.info(r['comment'])
 
 # ==========================================
@@ -330,11 +336,8 @@ def render_review_form(title: str, username: str):
 # ==========================================
 def main_app():
     username = st.session_state["username"]
-    
-    # Init AI
     if "ai" not in st.session_state: st.session_state.ai = AIHelper()
     
-    # Sidebar
     with st.sidebar:
         st.title(f"👤 {username}")
         stats = get_user_stats(username)
@@ -348,19 +351,16 @@ def main_app():
         if wishlist:
             for item in wishlist[-5:]:
                 st.caption(f"📖 {item['title']}")
-        else:
-            st.info("Empty")
+        else: st.info("Empty")
         
         st.divider()
         if st.button("🚪 Logout", use_container_width=True):
             st.session_state.clear()
             st.rerun()
     
-    # Main Content
     st.title("📚 BookBot Pro")
     tab1, tab2, tab3, tab4 = st.tabs(["🔍 Discover", "💡 Recommendations", "📖 Library", "📄 PDF Study"])
     
-    # TAB 1: DISCOVER
     with tab1:
         query = st.text_input("Search for books...", placeholder="Enter title or author")
         if st.button("🔎 Search", use_container_width=True):
@@ -373,17 +373,14 @@ def main_app():
                         with st.expander("🤖 AI Summary", expanded=True):
                             st.write(st.session_state.ai.summarize_book(book))
                         render_review_form(book['title'], username)
-                else:
-                    st.error(f"❌ No books found for '{query}'")
+                else: st.error(f"❌ No books found for '{query}'")
 
-    # TAB 2: RECOMMENDATIONS
     with tab2:
         prefs = st.text_area("What do you like?")
         if st.button("✨ Get Recommendations", use_container_width=True) and prefs:
             with st.spinner("Thinking..."):
                 st.markdown(st.session_state.ai.recommend_books(prefs))
 
-    # TAB 3: LIBRARY
     with tab3:
         st.header(f"📖 {username}'s Library")
         wishlist = get_wishlist(username)
@@ -391,13 +388,10 @@ def main_app():
             df = pd.DataFrame(wishlist)
             df.index = range(1, len(df) + 1)
             st.dataframe(df, use_container_width=True)
-            
             to_remove = st.selectbox("Select to remove:", [w['title'] for w in wishlist])
             st.button("Remove Book", on_click=remove_from_wishlist_callback, args=(username, to_remove))
-        else:
-            st.info("📚 Your library is empty!")
+        else: st.info("📚 Your library is empty!")
 
-    # TAB 4: PDF
     with tab4:
         pdf = st.file_uploader("Upload PDF", type="pdf")
         if pdf:
@@ -408,7 +402,6 @@ def main_app():
                         st.session_state.pdf_db = db
                         st.session_state.pdf_name = pdf.name
                         st.success("✅ PDF loaded!")
-            
             if "pdf_db" in st.session_state:
                 q = st.text_input("Ask PDF:")
                 if st.button("Analyze", use_container_width=True) and q:
