@@ -28,7 +28,13 @@ else:
     ssl._create_default_https_context = _create_unverified_https_context
 
 # 🔑 API TOKEN
-os.environ["HUGGINGFACEHUB_API_TOKEN"] = "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"
+if "HUGGINGFACE_TOKEN" in st.secrets:
+    os.environ["HUGGINGFACEHUB_API_TOKEN"] = st.secrets["HUGGINGFACE_TOKEN"]
+else:
+    # If running locally, you can load it from an environment variable or a local file
+    # BUT for now, to bypass the git error, we won't hardcode it here.
+    st.error("⚠️ HuggingFace Token not found! Please set it in Streamlit Secrets.")
+    st.stop()
 
 # ==========================================
 # ☁️ GOOGLE SHEETS STORAGE (PERMANENT)
@@ -282,4 +288,5 @@ with tab4:
         if st.button("Ask"):
             docs = st.session_state.db.similarity_search(q, k=3)
             ctx = "\n".join([d.page_content for d in docs])
+
             st.write(ask_ai(f"Context: {ctx}", q))
